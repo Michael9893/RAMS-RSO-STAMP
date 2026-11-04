@@ -13,18 +13,25 @@ export interface CategorizedDocumentInfo {
   documentType: string;
   documentNumber: string;
   series: string;
+  annexRef: string;
+  headerLogosText: string;
 
-  // 2. Dates Categorization
+  // 2. Full Body Narrative Text
+  bodyParagraph: string;
+  issuanceLocation: string;
+
+  // 3. Dates Categorization
   dates: {
     documentDate: string;
     effectiveDateRange: string;
     stampedDate: string;
   };
 
-  // 3. Personnel & Names Categorization
+  // 4. Personnel & Names Categorization
   personnel: DocumentPersonnel[];
+  tableHeaders: string[];
 
-  // 4. Issuance, Authority & Approval
+  // 5. Issuance, Authority & Approval
   approval: {
     approvedBy: string;
     approverPosition: string;
@@ -32,13 +39,17 @@ export interface CategorizedDocumentInfo {
     annexRef: string;
   };
 
-  // 5. Purpose, Venue & Event Details
+  // 6. Purpose, Venue & Event Details
   event: {
     purpose: string;
     venue: string;
   };
 
-  // 6. PDF Technical Specifications
+  // 7. Complete Verbatim PDF Text (100% of all text found in the PDF)
+  fullVerbatimText: string;
+  pagesText?: { pageNumber: number; text: string }[];
+
+  // 8. PDF Technical Specifications
   technical: {
     filename: string;
     fileSizeBytes: number;
@@ -48,10 +59,32 @@ export interface CategorizedDocumentInfo {
     pdfVersion: string;
   };
 
-  // 7. Custom Tags & Notes
+  // 9. Custom Tags & Notes
   notes: string;
   tags: string[];
 }
+
+export const DSWD_VERBATIM_TEXT = `DSWD Department of Social Welfare and Development · BAGONG PILIPINAS
+ANNEX I.1
+
+REGIONAL SPECIAL ORDER
+No. 002852
+Series of 2026
+
+SUBJECT: AUTHORITY TO TRAVEL ON OFFICIAL TIME
+
+In the exigency of service, the following Officials / Employees of the Department are hereby authorized to travel on 1 – 2 October 2026 at the Patio by Balai Norte, Panicsican, San Juan, La Union to attend the DSWD Field Office 1 Employees Credit Cooperative 16th Anniversary Celebration.
+
+TABLE OF AUTHORIZED PERSONNEL:
+| No. | Name | Position | Division/Section/ POO/ C/MOO | Classification of Travel¹ |
+| 1 | Marites C. Ysip | SWO IV / Vice-Chairperson, Credit Committee | PromSD – SLP | Local Travel |
+| 2 | Eliza M. Aromin | SWO II / Secretary | ProtSD – SPPMO | Local Travel |
+
+Issued at DSWD Field Office I in the City of San Fernando, La Union.
+
+APPROVED BY:
+Anniel J. Ferrer
+Regional Director / Authorized Official`;
 
 export const DEFAULT_DSWD_METADATA: CategorizedDocumentInfo = {
   title: 'REGIONAL SPECIAL ORDER',
@@ -59,6 +92,12 @@ export const DEFAULT_DSWD_METADATA: CategorizedDocumentInfo = {
   documentType: 'Special Order',
   documentNumber: '002852',
   series: 'Series of 2026',
+  annexRef: 'ANNEX I.1',
+  headerLogosText: 'DSWD Department of Social Welfare and Development · BAGONG PILIPINAS',
+  bodyParagraph:
+    'In the exigency of service, the following Officials / Employees of the Department are hereby authorized to travel on 1 – 2 October 2026 at the Patio by Balai Norte, Panicsican, San Juan, La Union to attend the DSWD Field Office 1 Employees Credit Cooperative 16th Anniversary Celebration.',
+  issuanceLocation: 'Issued at DSWD Field Office I in the City of San Fernando, La Union.',
+  tableHeaders: ['No.', 'Name', 'Position', 'Division/Section/POO/ C/MOO', 'Classification of Travel¹'],
   dates: {
     documentDate: '2026-09-28',
     effectiveDateRange: '1 – 2 October 2026',
@@ -90,6 +129,8 @@ export const DEFAULT_DSWD_METADATA: CategorizedDocumentInfo = {
     purpose: 'Attend the DSWD Field Office 1 Employees Credit Cooperative 16th Anniversary Celebration',
     venue: 'Patio by Balai Norte, Panicsican, San Juan, La Union',
   },
+  fullVerbatimText: DSWD_VERBATIM_TEXT,
+  pagesText: [{ pageNumber: 1, text: DSWD_VERBATIM_TEXT }],
   technical: {
     filename: 'Regional_Special_Order_DSWD.pdf',
     fileSizeBytes: 245760,

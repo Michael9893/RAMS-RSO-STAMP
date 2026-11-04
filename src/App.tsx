@@ -25,7 +25,7 @@ import {
   createSampleDocumentPdf,
   downloadPdfBlob,
 } from './utils/pdfStamper';
-import { loadPdfDocument } from './utils/pdfRenderer';
+import { loadPdfDocument, extractFullTextFromPdf } from './utils/pdfRenderer';
 import {
   CategorizedDocumentInfo,
   DEFAULT_DSWD_METADATA,
@@ -92,9 +92,22 @@ export default function App() {
       setCurrentPage(1);
       setStamp((prev) => ({ ...prev, pageNumber: 1 }));
 
-      // Update technical metadata
+      // Extract verbatim text from PDF
+      let extractedFullText = '';
+      let extractedPages: { pageNumber: number; text: string }[] = [];
+      try {
+        const textResult = await extractFullTextFromPdf(doc);
+        extractedFullText = textResult.fullText;
+        extractedPages = textResult.pagesText;
+      } catch (err) {
+        console.warn('Text extraction fallback:', err);
+      }
+
+      // Update technical and text metadata
       setMetadata((prev) => ({
         ...prev,
+        fullVerbatimText: extractedFullText.trim().length > 0 ? extractedFullText : prev.fullVerbatimText,
+        pagesText: extractedPages.length > 0 ? extractedPages : prev.pagesText,
         technical: {
           ...prev.technical,
           filename: name,

@@ -74,3 +74,29 @@ export async function renderPdfPageToCanvas(
     originalHeight: originalViewport.height,
   };
 }
+
+export async function extractFullTextFromPdf(pdfDoc: pdfjsLib.PDFDocumentProxy): Promise<{
+  fullText: string;
+  pagesText: { pageNumber: number; text: string }[];
+}> {
+  const pagesText: { pageNumber: number; text: string }[] = [];
+  let combined = '';
+
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    try {
+      const page = await pdfDoc.getPage(i);
+      const textContent = await page.getTextContent();
+      const strings = textContent.items
+        .map((item) => ('str' in item ? (item as { str: string }).str : ''))
+        .filter((s) => s.trim().length > 0);
+      const pageStr = strings.join(' ');
+      pagesText.push({ pageNumber: i, text: pageStr });
+      combined += (combined ? '\n\n' : '') + `[PAGE ${i}]\n` + pageStr;
+    } catch (e) {
+      console.warn(`Error extracting text from page ${i}:`, e);
+    }
+  }
+
+  return { fullText: combined, pagesText };
+}
+

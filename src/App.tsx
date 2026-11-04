@@ -9,18 +9,27 @@ import {
   HelpCircle,
   X,
   FileCheck,
+  ListFilter,
+  Sparkles,
 } from 'lucide-react';
 import { TopNavbar } from './components/TopNavbar';
 import { PdfDropzone } from './components/PdfDropzone';
 import { PdfViewer } from './components/PdfViewer';
 import { StampControls } from './components/StampControls';
+import { DownloadModal } from './components/DownloadModal';
+import { DocumentInfoModal } from './components/DocumentInfoModal';
 import {
   StampConfig,
   stampPdfDocument,
+  stampAndExtractSinglePagePdf,
   createSampleDocumentPdf,
   downloadPdfBlob,
 } from './utils/pdfStamper';
 import { loadPdfDocument } from './utils/pdfRenderer';
+import {
+  CategorizedDocumentInfo,
+  DEFAULT_DSWD_METADATA,
+} from './types/documentMetadata';
 
 export default function App() {
   const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null);
@@ -31,7 +40,12 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isLoadingSample, setIsLoadingSample] = useState<boolean>(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
+  const [isDownloadModalOpen, setIsDownloadModalOpen] = useState<boolean>(false);
+  const [isMetadataModalOpen, setIsMetadataModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Categorized Document Information (Name, Subject, Dates, Personnel, Approval)
+  const [metadata, setMetadata] = useState<CategorizedDocumentInfo>(DEFAULT_DSWD_METADATA);
 
   // Default stamp config initialized to match the user's sample document photo
   const [stamp, setStamp] = useState<StampConfig>({
@@ -77,6 +91,19 @@ export default function App() {
       setTotalPages(doc.numPages);
       setCurrentPage(1);
       setStamp((prev) => ({ ...prev, pageNumber: 1 }));
+
+      // Update technical metadata
+      setMetadata((prev) => ({
+        ...prev,
+        technical: {
+          ...prev.technical,
+          filename: name,
+          fileSizeBytes: masterCopy.byteLength,
+          fileSizeFormatted: `${(masterCopy.byteLength / 1024).toFixed(1)} KB`,
+          totalPages: doc.numPages,
+        },
+      }));
+
       showToast(`Loaded ${name} (${doc.numPages} page${doc.numPages > 1 ? 's' : ''})`);
     } catch (err) {
       console.error('Failed to load PDF bytes:', err);
@@ -117,6 +144,20 @@ export default function App() {
   const handleFileSelected = async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
     await loadPdfBytes(arrayBuffer, file.name);
+
+    // If uploading user document, adapt metadata
+    setMetadata((prev) => ({
+      ...prev,
+      title: file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
+      technical: {
+        filename: file.name,
+        fileSizeBytes: file.size,
+        fileSizeFormatted: `${(file.size / 1024).toFixed(1)} KB`,
+        totalPages: 1,
+        dimensions: 'Standard PDF Points',
+        pdfVersion: '1.7',
+      },
+    }));
   };
 
   const handleLoadSample = async () => {
@@ -124,6 +165,7 @@ export default function App() {
     try {
       const sample = await createSampleDocumentPdf();
       await loadPdfBytes(sample.data, sample.filename);
+      setMetadata(DEFAULT_DSWD_METADATA);
       // Reset position to underline in the sample
       setStamp((prev) => ({
         ...prev,
@@ -155,7 +197,14 @@ export default function App() {
   };
 
   const handleStampChange = (updated: Partial<StampConfig>) => {
-    setStamp((prev) => ({ ...prev, ...updated }));
+    setStamp((prev) => {
+      const next = { ...prev, ...updated };
+      if (updated.number !== undefined) {
+        // Keep metadata documentNumber in sync
+        setMetadata((m) => ({ ...m, documentNumber: updated.number! }));
+      }
+      return next;
+    });
   };
 
   const handleStampPositionChange = (xPercent: number, yPercent: number) => {
@@ -170,25 +219,56 @@ export default function App() {
     });
   }, []);
 
-  const handleDownloadStampedPdf = async () => {
+  // Opens the single file / download options modal
+  const handleOpenDownloadModal = () => {
     if (!pdfBytes) {
       showToast('No PDF loaded to stamp', 'error');
       return;
     }
+    setIsDownloadModalOpen(true);
+  };
+
+  // Executes download based on user's single file choice
+  const handleConfirmDownload = async (
+    scope: 'all' | 'current' | 'specific',
+    specificPage: number,
+    customFilename: string
+  ) => {
+    if (!pdfBytes) return;
 
     setIsProcessing(true);
     try {
-      const stampedPdfBytes = await stampPdfDocument(pdfBytes.slice(0), stamp);
-      const cleanBaseName = (filename || 'document').replace(/\.pdf$/i, '');
-      const downloadName = `${cleanBaseName}_stamped_${stamp.number}.pdf`;
-      downloadPdfBlob(stampedPdfBytes, downloadName);
-      showToast(`Stamped PDF saved as "${downloadName}"!`);
+      let finalBytes: Uint8Array;
+
+      if (scope === 'all') {
+        // Single combined PDF with all pages
+        finalBytes = await stampPdfDocument(pdfBytes.slice(0), stamp);
+      } else if (scope === 'current') {
+        // Single 1-page PDF of the current page only
+        finalBytes = await stampAndExtractSinglePagePdf(pdfBytes.slice(0), stamp, currentPage);
+      } else {
+        // Single 1-page PDF of the specific chosen page
+        finalBytes = await stampAndExtractSinglePagePdf(pdfBytes.slice(0), stamp, specificPage);
+      }
+
+      downloadPdfBlob(finalBytes, customFilename);
+      setIsDownloadModalOpen(false);
+      showToast(`Downloaded single file: "${customFilename}"!`);
     } catch (err) {
       console.error('Error stamping PDF document:', err);
-      showToast('Error stamping PDF. Please try again.', 'error');
+      showToast('Error generating PDF file. Please try again.', 'error');
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleUpdateMetadata = (updated: Partial<CategorizedDocumentInfo>) => {
+    setMetadata((prev) => ({ ...prev, ...updated }));
+  };
+
+  const handleApplyStampNumber = (num: string) => {
+    handleStampChange({ number: num });
+    showToast(`Applied "${num}" to stamp number!`);
   };
 
   return (
@@ -200,10 +280,11 @@ export default function App() {
         currentPage={currentPage}
         currentNumber={stamp.number}
         isProcessing={isProcessing}
-        onDownload={handleDownloadStampedPdf}
+        onDownload={handleOpenDownloadModal}
         onResetStamp={handleResetStamp}
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
         onLoadSample={handleLoadSample}
+        onOpenMetadataModal={() => setIsMetadataModalOpen(true)}
       />
 
       {/* 2. MAIN WORKSPACE CONTAINER */}
@@ -211,7 +292,7 @@ export default function App() {
         {pdfDocument ? (
           <>
             {/* Center: Interactive PDF Page Canvas Viewport */}
-            <div className="flex-1 h-full overflow-hidden flex flex-col">
+            <div className="flex-1 h-full overflow-hidden flex flex-col relative">
               <PdfViewer
                 pdfDocument={pdfDocument}
                 currentPage={currentPage}
@@ -226,6 +307,21 @@ export default function App() {
                 onStampPositionChange={handleStampPositionChange}
                 onStampNudge={handleStampNudge}
               />
+
+              {/* Quick Floating Pill: Document Info Drawer Access */}
+              <div className="absolute bottom-4 left-4 z-20 hidden sm:flex items-center gap-2">
+                <button
+                  onClick={() => setIsMetadataModalOpen(true)}
+                  className="px-3 py-1.5 bg-white/95 hover:bg-white text-slate-800 text-xs font-semibold rounded-lg shadow-md border border-slate-200 backdrop-blur-xs flex items-center gap-2 transition-all hover:scale-102"
+                  title="View full categorized details by Subject, Names, and Dates"
+                >
+                  <ListFilter className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Subject: <strong className="text-slate-900 truncate max-w-[160px] inline-block align-bottom">{metadata.subject}</strong></span>
+                  <span className="text-[10px] text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded font-mono">
+                    {metadata.personnel.length} Names
+                  </span>
+                </button>
+              </div>
             </div>
 
             {/* Right: Stamp Number & Styling Sidebar */}
@@ -236,7 +332,7 @@ export default function App() {
               isProcessing={isProcessing}
               onStampChange={handleStampChange}
               onStampNudge={handleStampNudge}
-              onDownload={handleDownloadStampedPdf}
+              onDownload={handleOpenDownloadModal}
             />
           </>
         ) : (
@@ -251,7 +347,28 @@ export default function App() {
         )}
       </main>
 
-      {/* 3. UPLOAD MODAL (when document is already open) */}
+      {/* 3. DOWNLOAD MODAL (Choose single file / specific page) */}
+      <DownloadModal
+        isOpen={isDownloadModalOpen}
+        filename={filename || 'document.pdf'}
+        totalPages={totalPages}
+        currentPage={currentPage}
+        stamp={stamp}
+        isProcessing={isProcessing}
+        onClose={() => setIsDownloadModalOpen(false)}
+        onConfirmDownload={handleConfirmDownload}
+      />
+
+      {/* 4. CATEGORIZED DOCUMENT INFO & METADATA MODAL */}
+      <DocumentInfoModal
+        isOpen={isMetadataModalOpen}
+        metadata={metadata}
+        onClose={() => setIsMetadataModalOpen(false)}
+        onUpdateMetadata={handleUpdateMetadata}
+        onApplyStampNumber={handleApplyStampNumber}
+      />
+
+      {/* 5. UPLOAD MODAL (when document is already open) */}
       {isUploadModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl relative border border-slate-200">
@@ -264,7 +381,7 @@ export default function App() {
 
             <h3 className="text-lg font-bold text-slate-900 mb-1">Upload New Document</h3>
             <p className="text-xs text-slate-500 mb-4">
-              Select or drop a new PDF file to stamp with 6-digit numbers.
+              Select or drop a new PDF file to stamp with numbers, text, or symbols.
             </p>
 
             <PdfDropzone
@@ -276,7 +393,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 4. TOAST NOTIFICATION */}
+      {/* 6. TOAST NOTIFICATION */}
       {toastMessage && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-2.5 bg-slate-900 text-white rounded-lg shadow-xl text-xs font-medium animate-in slide-in-from-bottom-3 duration-200">
           {toastMessage.type === 'success' ? (

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Download, RotateCcw, Upload, CheckCircle2 } from 'lucide-react';
+import { FileText, Download, RotateCcw, Upload, CheckCircle2, ListFilter, Sparkles } from 'lucide-react';
 
 interface TopNavbarProps {
   filename: string | null;
@@ -11,6 +11,7 @@ interface TopNavbarProps {
   onResetStamp: () => void;
   onOpenUploadModal: () => void;
   onLoadSample: () => void;
+  onOpenMetadataModal: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -23,6 +24,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onResetStamp,
   onOpenUploadModal,
   onLoadSample,
+  onOpenMetadataModal,
 }) => {
   return (
     <header className="h-16 bg-white border-b border-slate-200 px-4 md:px-6 flex items-center justify-between gap-4 shrink-0 shadow-xs z-30">
@@ -67,6 +69,15 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         >
           <FileText className="w-3.5 h-3.5 text-blue-600" />
           <span className="hidden sm:inline">Sample Doc</span>
+        </button>
+
+        <button
+          onClick={onOpenMetadataModal}
+          className="px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap border border-slate-200 shadow-2xs"
+          title="View categorized PDF details (Name, Subject, Date, Approval)"
+        >
+          <ListFilter className="w-3.5 h-3.5 text-blue-600" />
+          <span className="hidden sm:inline">Document Info</span>
         </button>
 
         <button

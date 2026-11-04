@@ -33,28 +33,79 @@ export function hexToRgb(hex: string) {
   return rgb(r / 255, g / 255, b / 255);
 }
 
-export function formatSixDigits(value: string, padWithZeros: boolean = true): string {
-  // Strip non-digits or allow letters if user typed custom serial
-  const digitsOnly = value.replace(/\D/g, '');
-  if (!padWithZeros) {
-    return digitsOnly.slice(0, 8);
-  }
-  if (digitsOnly.length === 0) {
-    return '000000';
-  }
-  // If digits are less than 6, pad start
-  if (digitsOnly.length <= 6) {
-    return digitsOnly.padStart(6, '0');
-  }
-  // If more, take last 6 or first 6 (first 6 is standard)
-  return digitsOnly.slice(0, 6);
+export function sanitizeForPdfFont(text: string): string {
+  // Normalize typography characters to standard ASCII printable range (32 to 126)
+  return text
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u2026]/g, '...')
+    .replace(/[^\x20-\x7E]/g, '');
 }
 
-export function incrementSixDigitNumber(currentNum: string, incrementBy: number = 1): string {
-  const clean = currentNum.replace(/\D/g, '') || '0';
-  const num = parseInt(clean, 10);
-  const next = Math.max(0, num + incrementBy);
-  return String(next).padStart(6, '0').slice(-6);
+export function formatDocumentNumber(value: string, padNumericPart: boolean = true): string {
+  if (!value) return padNumericPart ? '000000' : '';
+
+  if (!padNumericPart) {
+    return value.slice(0, 36);
+  }
+
+  // If input is purely numeric, pad to 6 digits
+  if (/^\d+$/.test(value)) {
+    return value.padStart(6, '0').slice(0, 12);
+  }
+
+  // If input has text prefix and ends with numbers (e.g. "RSO-2026-42" or "No. 42")
+  const match = value.match(/^(.*?)(\d+)$/);
+  if (match) {
+    const prefix = match[1];
+    const numPart = match[2];
+    if (numPart.length < 6) {
+      return `${prefix}${numPart.padStart(6, '0')}`;
+    }
+  }
+
+  return value.slice(0, 36);
+}
+
+export const formatSixDigits = formatDocumentNumber;
+
+export function incrementDocumentNumber(currentVal: string, incrementBy: number = 1): string {
+  if (!currentVal) return '000001';
+
+  // Match the last sequence of digits anywhere in the string
+  const lastNumMatch = currentVal.match(/(.*?)(\d+)(.*?)$/);
+  if (lastNumMatch) {
+    const prefix = lastNumMatch[1];
+    const digitsStr = lastNumMatch[2];
+    const suffix = lastNumMatch[3];
+    const originalLen = digitsStr.length;
+    const num = parseInt(digitsStr, 10);
+    const nextNum = Math.max(0, num + incrementBy);
+    const nextDigitsStr = String(nextNum).padStart(originalLen, '0');
+    return `${prefix}${nextDigitsStr}${suffix}`;
+  }
+
+  return `${currentVal}-${String(incrementBy).padStart(6, '0')}`;
+}
+
+export const incrementSixDigitNumber = incrementDocumentNumber;
+
+export async function stampAndExtractSinglePagePdf(
+  pdfBytes: ArrayBuffer | Uint8Array,
+  stamp: StampConfig,
+  targetPageNumber: number // 1-indexed
+): Promise<Uint8Array> {
+  const stampedBytes = await stampPdfDocument(pdfBytes, stamp);
+  const stampedDoc = await PDFDocument.load(stampedBytes);
+  const totalPages = stampedDoc.getPageCount();
+  const safePageIdx = Math.max(0, Math.min(totalPages - 1, targetPageNumber - 1));
+
+  const singlePageDoc = await PDFDocument.create();
+  const [copiedPage] = await singlePageDoc.copyPages(stampedDoc, [safePageIdx]);
+  singlePageDoc.addPage(copiedPage);
+
+  return await singlePageDoc.save();
 }
 
 export async function stampPdfDocument(
@@ -93,8 +144,6 @@ export async function stampPdfDocument(
     targetPageIndices.push(targetIdx);
   }
 
-  const baseNumberInt = parseInt(stamp.number.replace(/\D/g, '') || '0', 10);
-
   for (let idx = 0; idx < targetPageIndices.length; idx++) {
     const pageIndex = targetPageIndices[idx];
     const page = pages[pageIndex];
@@ -103,11 +152,10 @@ export async function stampPdfDocument(
     // Calculate sequential number if applicable
     let currentNumberStr = stamp.number;
     if (stamp.applyToAllPages && stamp.sequential) {
-      const pageOffset = idx;
-      currentNumberStr = String(baseNumberInt + pageOffset).padStart(6, '0');
+      currentNumberStr = incrementDocumentNumber(stamp.number, idx);
     }
 
-    const fullStampText = `${stamp.prefix}${currentNumberStr}${stamp.suffix}`;
+    const fullStampText = sanitizeForPdfFont(`${stamp.prefix}${currentNumberStr}${stamp.suffix}`) || ' ';
     const textWidth = font.widthOfTextAtSize(fullStampText, stamp.fontSize);
     const textHeight = font.heightAtSize(stamp.fontSize);
 

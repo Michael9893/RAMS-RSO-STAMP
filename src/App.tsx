@@ -22,6 +22,7 @@ import {
   StampConfig,
   stampPdfDocument,
   stampAndExtractSinglePagePdf,
+  stampAndExtractSelectedPagesPdf,
   createSampleDocumentPdf,
   downloadPdfBlob,
 } from './utils/pdfStamper';
@@ -241,32 +242,29 @@ export default function App() {
     setIsDownloadModalOpen(true);
   };
 
-  // Executes download based on user's single file choice
+  // Executes download based on user's selected pages
   const handleConfirmDownload = async (
-    scope: 'all' | 'current' | 'specific',
-    specificPage: number,
+    selectedPages: number[],
     customFilename: string
   ) => {
     if (!pdfBytes) return;
 
     setIsProcessing(true);
     try {
-      let finalBytes: Uint8Array;
-
-      if (scope === 'all') {
-        // Single combined PDF with all pages
-        finalBytes = await stampPdfDocument(pdfBytes.slice(0), stamp);
-      } else if (scope === 'current') {
-        // Single 1-page PDF of the current page only
-        finalBytes = await stampAndExtractSinglePagePdf(pdfBytes.slice(0), stamp, currentPage);
-      } else {
-        // Single 1-page PDF of the specific chosen page
-        finalBytes = await stampAndExtractSinglePagePdf(pdfBytes.slice(0), stamp, specificPage);
-      }
+      // Extract and stamp only the chosen pages (e.g. [1, 3, 4] of 4)
+      const finalBytes = await stampAndExtractSelectedPagesPdf(
+        pdfBytes.slice(0),
+        stamp,
+        selectedPages
+      );
 
       downloadPdfBlob(finalBytes, customFilename);
       setIsDownloadModalOpen(false);
-      showToast(`Downloaded single file: "${customFilename}"!`);
+      showToast(
+        selectedPages.length === totalPages
+          ? `Downloaded all ${totalPages} pages: "${customFilename}"!`
+          : `Downloaded ${selectedPages.length} selected page${selectedPages.length > 1 ? 's' : ''} (Pages ${selectedPages.join(', ')}): "${customFilename}"!`
+      );
     } catch (err) {
       console.error('Error stamping PDF document:', err);
       showToast('Error generating PDF file. Please try again.', 'error');
@@ -311,6 +309,8 @@ export default function App() {
                 currentPage={currentPage}
                 totalPages={totalPages}
                 stamp={stamp}
+                extractedFullText={metadata.fullVerbatimText}
+                pagesText={metadata.pagesText}
                 onPageChange={(page) => {
                   setCurrentPage(page);
                   if (!stamp.applyToAllPages) {
@@ -319,6 +319,7 @@ export default function App() {
                 }}
                 onStampPositionChange={handleStampPositionChange}
                 onStampNudge={handleStampNudge}
+                onApplyStampNumber={handleApplyStampNumber}
               />
 
               {/* Quick Floating Pill: Document Info Drawer Access */}

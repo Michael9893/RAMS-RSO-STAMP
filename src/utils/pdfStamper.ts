@@ -96,16 +96,33 @@ export async function stampAndExtractSinglePagePdf(
   stamp: StampConfig,
   targetPageNumber: number // 1-indexed
 ): Promise<Uint8Array> {
+  return stampAndExtractSelectedPagesPdf(pdfBytes, stamp, [targetPageNumber]);
+}
+
+export async function stampAndExtractSelectedPagesPdf(
+  pdfBytes: ArrayBuffer | Uint8Array,
+  stamp: StampConfig,
+  selectedPageNumbers: number[] // 1-indexed, e.g. [1, 3, 4]
+): Promise<Uint8Array> {
   const stampedBytes = await stampPdfDocument(pdfBytes, stamp);
   const stampedDoc = await PDFDocument.load(stampedBytes);
   const totalPages = stampedDoc.getPageCount();
-  const safePageIdx = Math.max(0, Math.min(totalPages - 1, targetPageNumber - 1));
 
-  const singlePageDoc = await PDFDocument.create();
-  const [copiedPage] = await singlePageDoc.copyPages(stampedDoc, [safePageIdx]);
-  singlePageDoc.addPage(copiedPage);
+  // Deduplicate and filter valid page numbers
+  const validPages = Array.from(new Set(selectedPageNumbers))
+    .filter((p) => p >= 1 && p <= totalPages)
+    .sort((a, b) => a - b);
 
-  return await singlePageDoc.save();
+  if (validPages.length === 0 || validPages.length === totalPages) {
+    return stampedBytes;
+  }
+
+  const pageIndicesToCopy = validPages.map((p) => p - 1);
+  const selectedDoc = await PDFDocument.create();
+  const copiedPages = await selectedDoc.copyPages(stampedDoc, pageIndicesToCopy);
+  copiedPages.forEach((page) => selectedDoc.addPage(page));
+
+  return await selectedDoc.save();
 }
 
 export async function stampPdfDocument(
@@ -257,7 +274,12 @@ export async function createSampleDocumentPdf(): Promise<{ data: Uint8Array; fil
     const response = await fetch('/assets/aistudio/image_f1584ad3.png');
     if (response.ok) {
       const imageBytes = await response.arrayBuffer();
-      const img = await pdfDoc.embedPng(imageBytes);
+      let img;
+      try {
+        img = await pdfDoc.embedPng(imageBytes);
+      } catch {
+        img = await pdfDoc.embedJpg(imageBytes);
+      }
       
       // Standard A4 dimensions in points: 595.28 x 841.89
       const pageWidth = 595.28;

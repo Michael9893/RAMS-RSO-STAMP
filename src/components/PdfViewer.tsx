@@ -76,8 +76,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         if (!isCancelled) {
           setRenderedInfo(info);
         }
-      } catch (err) {
-        console.error('Failed to render PDF page:', err);
+      } catch (err: any) {
+        if (
+          err?.name !== 'RenderingCancelledException' &&
+          !err?.message?.toLowerCase().includes('cancelled')
+        ) {
+          console.error('Failed to render PDF page:', err);
+        }
       } finally {
         if (!isCancelled) {
           setIsRendering(false);
@@ -89,6 +94,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
     return () => {
       isCancelled = true;
+      if (canvasRef.current && (canvasRef.current as any)._activeRenderTask) {
+        try {
+          (canvasRef.current as any)._activeRenderTask.cancel();
+        } catch {
+          // Ignore cancellation during unmount
+        }
+      }
     };
   }, [pdfDocument, currentPage, scale]);
 

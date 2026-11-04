@@ -31,6 +31,7 @@ import {
   CategorizedDocumentInfo,
   DEFAULT_DSWD_METADATA,
 } from './types/documentMetadata';
+import { parseDocumentInfoFromExtractedText } from './utils/textParser';
 
 export default function App() {
   const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null);
@@ -104,21 +105,34 @@ export default function App() {
         console.warn('Text extraction fallback:', err);
       }
 
-      // Update technical and text metadata
-      setMetadata((prev) => ({
-        ...prev,
-        fullVerbatimText: extractedFullText.trim().length > 0 ? extractedFullText : prev.fullVerbatimText,
-        pagesText: extractedPages.length > 0 ? extractedPages : prev.pagesText,
-        technical: {
-          ...prev.technical,
-          filename: name,
-          fileSizeBytes: masterCopy.byteLength,
-          fileSizeFormatted: `${(masterCopy.byteLength / 1024).toFixed(1)} KB`,
-          totalPages: doc.numPages,
-        },
-      }));
+      // Check if loading the built-in sample document
+      const isSample =
+        name === 'Regional_Special_Order_DSWD.pdf' ||
+        name === 'Sample_Official_Order.pdf';
 
-      showToast(`Loaded ${name} (${doc.numPages} page${doc.numPages > 1 ? 's' : ''})`);
+      if (isSample) {
+        setMetadata(DEFAULT_DSWD_METADATA);
+      } else {
+        // Automatically extract all text and parse into Categorized Document Info for the new PDF
+        const newDocMetadata = parseDocumentInfoFromExtractedText(
+          extractedFullText,
+          name,
+          doc.numPages,
+          masterCopy.byteLength,
+          extractedPages
+        );
+        setMetadata(newDocMetadata);
+
+        // If a document number was detected in the new PDF, set stamp number to match
+        if (newDocMetadata.documentNumber && newDocMetadata.documentNumber !== '000001') {
+          setStamp((prev) => ({
+            ...prev,
+            number: newDocMetadata.documentNumber,
+          }));
+        }
+      }
+
+      showToast(`Loaded ${name} (${doc.numPages} page${doc.numPages > 1 ? 's' : ''}) - Document Info updated!`);
     } catch (err) {
       console.error('Failed to load PDF bytes:', err);
       showToast('Could not parse PDF. Please verify it is a valid PDF document.', 'error');
@@ -158,20 +172,6 @@ export default function App() {
   const handleFileSelected = async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
     await loadPdfBytes(arrayBuffer, file.name);
-
-    // If uploading user document, adapt metadata
-    setMetadata((prev) => ({
-      ...prev,
-      title: file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
-      technical: {
-        filename: file.name,
-        fileSizeBytes: file.size,
-        fileSizeFormatted: `${(file.size / 1024).toFixed(1)} KB`,
-        totalPages: 1,
-        dimensions: 'Standard PDF Points',
-        pdfVersion: '1.7',
-      },
-    }));
   };
 
   const handleLoadSample = async () => {

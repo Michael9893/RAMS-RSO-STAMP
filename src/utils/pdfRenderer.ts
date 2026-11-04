@@ -39,6 +39,18 @@ export async function renderPdfPageToCanvas(
   canvas: HTMLCanvasElement,
   scale: number = 1.5
 ): Promise<RenderedPageInfo> {
+  // If a previous render task is still in progress on this canvas, cancel it cleanly
+  const prevTask = (canvas as any)._activeRenderTask;
+  if (prevTask) {
+    try {
+      prevTask.cancel();
+      await prevTask.promise.catch(() => {});
+    } catch {
+      // Ignore cancellation exceptions from previous task
+    }
+    (canvas as any)._activeRenderTask = null;
+  }
+
   const page = await pdfDoc.getPage(pageNumber);
   const viewport = page.getViewport({ scale });
 
@@ -62,7 +74,32 @@ export async function renderPdfPageToCanvas(
   };
 
   // @ts-expect-error pdfjs-dist types
-  await page.render(renderContext).promise;
+  const renderTask = page.render(renderContext);
+  (canvas as any)._activeRenderTask = renderTask;
+
+  try {
+    await renderTask.promise;
+  } catch (err: any) {
+    // Gracefully handle cancelled tasks without throwing unhandled exceptions
+    if (
+      err?.name === 'RenderingCancelledException' ||
+      err?.message?.toLowerCase().includes('cancelled')
+    ) {
+      const originalViewport = page.getViewport({ scale: 1.0 });
+      return {
+        pageNumber,
+        width: viewport.width,
+        height: viewport.height,
+        originalWidth: originalViewport.width,
+        originalHeight: originalViewport.height,
+      };
+    }
+    throw err;
+  } finally {
+    if ((canvas as any)._activeRenderTask === renderTask) {
+      (canvas as any)._activeRenderTask = null;
+    }
+  }
 
   const originalViewport = page.getViewport({ scale: 1.0 });
 

@@ -49,26 +49,27 @@ export default function App() {
   // Categorized Document Information (Name, Subject, Dates, Personnel, Approval)
   const [metadata, setMetadata] = useState<CategorizedDocumentInfo>(DEFAULT_DSWD_METADATA);
 
-  // Default stamp config initialized to match the user's sample document photo
+  // Default stamp config initialized to match official government standards
   const [stamp, setStamp] = useState<StampConfig>({
     id: 'default-stamp',
     number: '002852',
     prefix: '',
     suffix: '',
     xPercent: 16.5,
-    yPercent: 14.2,
+    yPercent: 13.8, // Exactly on the underline of "No. ________"
     pageNumber: 1,
     applyToAllPages: false,
     sequential: false,
-    fontSize: 16,
+    fontSize: 15, // Standard professional 15pt government numbering
     fontFamily: 'Courier',
-    color: '#0038a8', // Official DSWD blue stamp ink
-    opacity: 0.95,
-    rotation: -0.5,
+    color: '#0038a8', // Official Philippine Government blue stamp ink
+    opacity: 0.96,
+    rotation: 0, // Clean 0° horizontal government alignment
     boxStyle: 'none',
     padWithZeros: true,
     letterSpacing: 0,
     isStampDistressed: true,
+    documentType: 'NONE',
   });
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
@@ -361,9 +362,10 @@ export default function App() {
         )}
       </main>
 
-      {/* 3. DOWNLOAD MODAL (Choose single file / specific page) */}
+      {/* 3. DOWNLOAD MODAL (Choose single file / specific page, with live alignment preview) */}
       <DownloadModal
         isOpen={isDownloadModalOpen}
+        pdfBytes={pdfBytes}
         filename={filename || 'document.pdf'}
         totalPages={totalPages}
         currentPage={currentPage}

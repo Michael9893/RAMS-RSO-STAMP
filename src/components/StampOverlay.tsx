@@ -1,6 +1,6 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { Move, Check, CornerDownRight } from 'lucide-react';
-import { StampConfig } from '../utils/pdfStamper';
+import React, { useRef, useState } from 'react';
+import { Move } from 'lucide-react';
+import { StampConfig, STAMP_PAD_X_PT, STAMP_PAD_Y_PT } from '../utils/pdfStamper';
 
 interface StampOverlayProps {
   stamp: StampConfig;
@@ -36,11 +36,11 @@ export const StampOverlay: React.FC<StampOverlayProps> = ({
   const getFontFamilyStyle = () => {
     switch (stamp.fontFamily) {
       case 'Courier':
-        return "'JetBrains Mono', 'Courier New', Courier, monospace";
+        return "'Courier New', Courier, monospace";
       case 'TimesRoman':
         return "'Times New Roman', Times, serif";
       default:
-        return "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
+        return "'Helvetica Neue', Helvetica, Arial, sans-serif";
     }
   };
 
@@ -88,7 +88,9 @@ export const StampOverlay: React.FC<StampOverlayProps> = ({
   };
 
   // Convert points to screen pixels based on current canvas scale
-  const displayFontSize = Math.max(10, stamp.fontSize * scale);
+  const displayFontSize = stamp.fontSize * scale;
+  const padX = STAMP_PAD_X_PT * scale;
+  const padY = STAMP_PAD_Y_PT * scale;
 
   // Border style
   const getBoxStyleClass = () => {
@@ -100,7 +102,7 @@ export const StampOverlay: React.FC<StampOverlayProps> = ({
       case 'underline':
         return 'border-b-2';
       default:
-        return 'border border-transparent';
+        return 'border border-dashed border-blue-400/30 hover:border-blue-400';
     }
   };
 
@@ -114,18 +116,20 @@ export const StampOverlay: React.FC<StampOverlayProps> = ({
       style={{
         left: `${stamp.xPercent}%`,
         top: `${stamp.yPercent}%`,
-        transform: `translate(0, 0) rotate(${stamp.rotation}deg)`,
+        padding: `${padY}px ${padX}px`,
+        transform: `rotate(${stamp.rotation}deg)`,
         transformOrigin: 'top left',
         color: stamp.color,
         fontFamily: getFontFamilyStyle(),
         fontSize: `${displayFontSize}px`,
+        lineHeight: 1,
         opacity: stamp.opacity,
-        borderColor: stamp.color,
+        borderColor: stamp.boxStyle === 'none' ? undefined : stamp.color,
         outlineColor: stamp.color,
       }}
-      className={`absolute select-none cursor-move transition-shadow z-20 group px-2 py-0.5 rounded-xs leading-none font-bold tracking-wider ${getBoxStyleClass()} ${
+      className={`absolute select-none cursor-move transition-shadow z-20 group font-bold ${getBoxStyleClass()} ${
         isSelected
-          ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white shadow-md'
+          ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-white shadow-md bg-blue-500/5'
           : 'hover:ring-1 hover:ring-blue-300'
       } ${stamp.isStampDistressed ? 'drop-shadow-xs' : ''}`}
       title="Click and drag to position. Arrow keys nudge."
@@ -135,11 +139,13 @@ export const StampOverlay: React.FC<StampOverlayProps> = ({
         {fullText}
       </span>
 
-      {/* Position Tooltip indicator when selected */}
+      {/* Position and Alignment Tooltip indicator when selected */}
       {isSelected && (
-        <div className="absolute -top-7 left-0 bg-slate-900/90 text-white text-[10px] font-mono px-1.5 py-0.5 rounded shadow pointer-events-none whitespace-nowrap z-30 flex items-center gap-1">
+        <div className="absolute -top-7 left-0 bg-slate-900/95 text-white text-[10px] font-mono px-2 py-0.5 rounded shadow pointer-events-none whitespace-nowrap z-30 flex items-center gap-1.5">
           <Move className="w-2.5 h-2.5 text-blue-400" />
           <span>X: {stamp.xPercent.toFixed(1)}% · Y: {stamp.yPercent.toFixed(1)}%</span>
+          <span className="text-slate-400">|</span>
+          <span className="text-emerald-400 font-semibold">{stamp.fontSize}pt</span>
         </div>
       )}
 
@@ -152,3 +158,4 @@ export const StampOverlay: React.FC<StampOverlayProps> = ({
     </div>
   );
 };
+

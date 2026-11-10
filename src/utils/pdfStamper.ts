@@ -1,25 +1,58 @@
 import { PDFDocument, rgb, StandardFonts, degrees } from 'pdf-lib';
 
+// Standard font metrics constants for pixel-perfect PDF alignment
+const FONT_METRICS: Record<string, { capHeightRatio: number; descentRatio: number }> = {
+  Courier: { capHeightRatio: 0.68, descentRatio: 0.22 },
+  Helvetica: { capHeightRatio: 0.72, descentRatio: 0.21 },
+  TimesRoman: { capHeightRatio: 0.68, descentRatio: 0.22 },
+};
+
+// Standard padding around stamp in PDF points
+export const STAMP_PAD_X_PT = 4;
+export const STAMP_PAD_Y_PT = 2;
+
 export interface StampConfig {
   id: string;
-  number: string; // 6 digits, e.g. "002852"
-  prefix: string; // e.g. "No. " or ""
+  number: string; // 6 digits or alphanumeric, e.g. "002852"
+  prefix: string; // e.g. "RSO No. " or ""
   suffix: string; // e.g. ""
   xPercent: number; // 0 to 100 (% of page width)
   yPercent: number; // 0 to 100 (% of page height from top)
   pageNumber: number; // 1-indexed
   applyToAllPages: boolean;
   sequential: boolean; // increment number per page
-  fontSize: number; // in points (e.g. 18)
+  fontSize: number; // in points (e.g. 15 for government standard)
   fontFamily: 'Courier' | 'Helvetica' | 'TimesRoman';
-  color: string; // hex color e.g. "#0038A8"
+  color: string; // hex color e.g. "#0038a8"
   opacity: number; // 0.1 to 1.0
   rotation: number; // in degrees (-45 to 45)
   boxStyle: 'none' | 'box' | 'underline' | 'double-box';
   padWithZeros: boolean;
   letterSpacing: number; // slight spacing between digits for mechanical stamp feel
   isStampDistressed?: boolean; // slight rubber stamp ink variation
+  documentType?: 'RSO' | 'MEMO ES/FWA' | 'MEMO_ATT/ATA' | 'RAO_RMC' | 'U_MEMO' | 'NOV' | 'CUSTOM' | 'NONE';
 }
+
+// Government Standard Preset values for professional numbering
+export const GOVERNMENT_STANDARD_STAMP: Partial<StampConfig> = {
+  fontFamily: 'Courier',
+  fontSize: 15,
+  color: '#0038a8', // Official Philippine Government Blue Ink
+  opacity: 0.96,
+  rotation: 0,
+  boxStyle: 'none',
+  padWithZeros: true,
+  isStampDistressed: true,
+};
+
+export const GOVERNMENT_DOCUMENT_TYPES = [
+  { id: 'RSO', label: 'RSO', fullName: 'Regional Special Order', defaultPrefix: 'RSO No. ' },
+  { id: 'MEMO ES/FWA', label: 'MEMO ES/FWA', fullName: 'Memo - Executive Services / FWA', defaultPrefix: 'MEMO ES/FWA No. ' },
+  { id: 'MEMO_ATT/ATA', label: 'MEMO_ATT/ATA', fullName: 'Memo - Authority to Travel / Attend', defaultPrefix: 'MEMO_ATT/ATA No. ' },
+  { id: 'RAO_RMC', label: 'RAO_RMC', fullName: 'Regional Admin Order / Memo Circular', defaultPrefix: 'RAO_RMC No. ' },
+  { id: 'U_MEMO', label: 'U_MEMO', fullName: 'Unnumbered / Unit Memorandum', defaultPrefix: 'U_MEMO No. ' },
+  { id: 'NOV', label: 'NOV', fullName: 'Notice of Violation', defaultPrefix: 'NOV No. ' },
+] as const;
 
 export function hexToRgb(hex: string) {
   const cleanHex = hex.replace('#', '');
@@ -125,6 +158,9 @@ export async function stampAndExtractSelectedPagesPdf(
   return await selectedDoc.save();
 }
 
+/**
+ * Stamps the PDF document with mathematical coordinate alignment matching the interactive screen overlay.
+ */
 export async function stampPdfDocument(
   pdfBytes: ArrayBuffer | Uint8Array,
   stamp: StampConfig
@@ -140,14 +176,19 @@ export async function stampPdfDocument(
 
   // Select font
   let font;
+  let fontKey = 'Courier';
   if (stamp.fontFamily === 'Courier') {
     font = await pdfDoc.embedFont(StandardFonts.CourierBold);
+    fontKey = 'Courier';
   } else if (stamp.fontFamily === 'TimesRoman') {
     font = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+    fontKey = 'TimesRoman';
   } else {
     font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    fontKey = 'Helvetica';
   }
 
+  const metrics = FONT_METRICS[fontKey] || FONT_METRICS.Courier;
   const textColor = hexToRgb(stamp.color);
 
   // Determine pages to stamp
@@ -176,29 +217,44 @@ export async function stampPdfDocument(
     const textWidth = font.widthOfTextAtSize(fullStampText, stamp.fontSize);
     const textHeight = font.heightAtSize(stamp.fontSize);
 
-    // Convert percentage (from top-left of page) to PDF points (origin at bottom-left)
-    const stampX = (stamp.xPercent / 100) * pageWidth;
-    // in canvas, y=0 is top. In PDF, y=0 is bottom.
-    const stampYFromTop = (stamp.yPercent / 100) * pageHeight;
-    const stampY = pageHeight - stampYFromTop;
+    // EXACT COORDINATE MATH TO MATCH SCREEN OVERLAY:
+    // In StampOverlay, the bounding box top-left is placed at:
+    // left: (stamp.xPercent / 100) * containerWidth
+    // top:  (stamp.yPercent / 100) * containerHeight
+    // with padding STAMP_PAD_X_PT and STAMP_PAD_Y_PT.
+    const padX = STAMP_PAD_X_PT;
+    const padY = STAMP_PAD_Y_PT;
 
-    // Save graphics state & draw text
+    // Outer box top-left in PDF points (measuring from top):
+    const boxLeft = (stamp.xPercent / 100) * pageWidth;
+    const boxTopFromPageTop = (stamp.yPercent / 100) * pageHeight;
+
+    const boxWidth = textWidth + padX * 2;
+    const boxHeight = textHeight + padY * 2;
+
+    // In PDF space, origin is bottom-left.
+    // The bottom of the outer box is:
+    const boxBottomPdf = pageHeight - (boxTopFromPageTop + boxHeight);
+
+    // Font cap height (distance from baseline to top of capital letters)
+    const capHeight = stamp.fontSize * metrics.capHeightRatio;
+
+    // The text in StampOverlay is placed at (boxLeft + padX, boxTopFromPageTop + padY)
+    // In PDF, page.drawText's Y is the font BASELINE.
+    // Therefore, baseline from page top is: boxTopFromPageTop + padY + capHeight.
+    // In PDF coordinate space (y=0 at bottom), baseline Y is:
+    const stampTextX = boxLeft + padX;
+    const stampTextY = pageHeight - (boxTopFromPageTop + padY + capHeight);
+
     page.pushOperators();
 
     // Handle box or underline frames
-    const paddingX = 6;
-    const paddingY = 4;
-    const boxX = stampX - paddingX;
-    const boxY = stampY - paddingY;
-    const boxW = textWidth + paddingX * 2;
-    const boxH = textHeight + paddingY * 2;
-
     if (stamp.boxStyle === 'box') {
       page.drawRectangle({
-        x: boxX,
-        y: boxY,
-        width: boxW,
-        height: boxH,
+        x: boxLeft,
+        y: boxBottomPdf,
+        width: boxWidth,
+        height: boxHeight,
         borderColor: textColor,
         borderWidth: 1.5,
         opacity: stamp.opacity,
@@ -206,39 +262,40 @@ export async function stampPdfDocument(
       });
     } else if (stamp.boxStyle === 'double-box') {
       page.drawRectangle({
-        x: boxX,
-        y: boxY,
-        width: boxW,
-        height: boxH,
+        x: boxLeft,
+        y: boxBottomPdf,
+        width: boxWidth,
+        height: boxHeight,
         borderColor: textColor,
         borderWidth: 1.5,
         opacity: stamp.opacity,
         rotate: degrees(stamp.rotation),
       });
       page.drawRectangle({
-        x: boxX - 2.5,
-        y: boxY - 2.5,
-        width: boxW + 5,
-        height: boxH + 5,
+        x: boxLeft - 2.5,
+        y: boxBottomPdf - 2.5,
+        width: boxWidth + 5,
+        height: boxHeight + 5,
         borderColor: textColor,
         borderWidth: 0.8,
         opacity: stamp.opacity * 0.8,
         rotate: degrees(stamp.rotation),
       });
     } else if (stamp.boxStyle === 'underline') {
+      const underlineY = stampTextY - 2;
       page.drawLine({
-        start: { x: boxX, y: boxY },
-        end: { x: boxX + boxW, y: boxY },
+        start: { x: boxLeft, y: underlineY },
+        end: { x: boxLeft + boxWidth, y: underlineY },
         color: textColor,
         thickness: 1.5,
         opacity: stamp.opacity,
       });
     }
 
-    // Draw main text
+    // Draw main stamped text at precision baseline
     page.drawText(fullStampText, {
-      x: stampX,
-      y: stampY,
+      x: stampTextX,
+      y: stampTextY,
       size: stamp.fontSize,
       font: font,
       color: textColor,
@@ -246,15 +303,15 @@ export async function stampPdfDocument(
       rotate: degrees(stamp.rotation),
     });
 
-    // If distress/ink texture is enabled, add subtle realistic ink artifact
+    // If distress/ink texture is enabled, add subtle authentic mechanical ink artifact
     if (stamp.isStampDistressed) {
       page.drawText(fullStampText, {
-        x: stampX + 0.4,
-        y: stampY - 0.3,
+        x: stampTextX + 0.35,
+        y: stampTextY - 0.25,
         size: stamp.fontSize,
         font: font,
         color: textColor,
-        opacity: stamp.opacity * 0.3,
+        opacity: stamp.opacity * 0.32,
         rotate: degrees(stamp.rotation),
       });
     }

@@ -10,9 +10,20 @@ import {
   Crosshair,
   RefreshCw,
   Check,
+  FileCheck2,
+  Sparkles,
+  RotateCcw,
 } from 'lucide-react';
 import { StampConfig, stampPdfDocument } from '../utils/pdfStamper';
 import { loadPdfDocument, renderPdfPageToCanvas } from '../utils/pdfRenderer';
+import { CategorizedDocumentInfo } from '../types/documentMetadata';
+import {
+  generateGovernmentFilename,
+  GOVERNMENT_DOC_TYPES,
+  GovernmentDocType,
+  detectGovernmentDocType,
+  extractSeriesYear,
+} from '../utils/filenameGenerator';
 
 interface DownloadModalProps {
   isOpen: boolean;
@@ -21,6 +32,7 @@ interface DownloadModalProps {
   totalPages: number;
   currentPage: number;
   stamp: StampConfig;
+  metadata?: CategorizedDocumentInfo;
   isProcessing: boolean;
   onClose: () => void;
   onConfirmDownload: (selectedPages: number[], customFilename: string) => void;
@@ -33,6 +45,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   totalPages,
   currentPage,
   stamp,
+  metadata,
   isProcessing,
   onClose,
   onConfirmDownload,
@@ -40,6 +53,13 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   // Array of selected 1-indexed page numbers
   const [selectedPages, setSelectedPages] = useState<number[]>([]);
   const [rangeInput, setRangeInput] = useState<string>('');
+
+  // Government Filename Generation State
+  const initialDocType = detectGovernmentDocType(stamp, metadata);
+  const [activeDocType, setActiveDocType] = useState<GovernmentDocType>(initialDocType);
+  const [customSubject, setCustomSubject] = useState<string>(metadata?.subject || 'AUTHORITY TO TRAVEL ON OFFICIAL TIME');
+  const [outputFilename, setOutputFilename] = useState<string>('');
+  const [isManualFilenameEdit, setIsManualFilenameEdit] = useState<boolean>(false);
 
   // Live Stamped PDF Preview state
   const [previewPageNumber, setPreviewPageNumber] = useState<number>(currentPage || 1);
@@ -50,10 +70,16 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
-  // Initialize selected pages when modal opens
+  // Initialize selected pages and doc type when modal opens
   useEffect(() => {
     if (isOpen) {
       setPreviewPageNumber(currentPage || 1);
+      const detected = detectGovernmentDocType(stamp, metadata);
+      setActiveDocType(detected);
+      if (metadata?.subject) {
+        setCustomSubject(metadata.subject);
+      }
+
       if (totalPages <= 1) {
         setSelectedPages([1]);
         setRangeInput('1');
@@ -62,32 +88,31 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
         setSelectedPages(all);
         setRangeInput(`1-${totalPages}`);
       }
+
+      // Generate initial standard government filename
+      const generated = generateGovernmentFilename(stamp, metadata, {
+        docTypeOverride: detected,
+        customSubject: metadata?.subject,
+        selectedPages: totalPages > 1 ? Array.from({ length: totalPages }, (_, i) => i + 1) : [1],
+        totalPages,
+      });
+      setOutputFilename(generated);
+      setIsManualFilenameEdit(false);
     }
-  }, [isOpen, totalPages, currentPage]);
+  }, [isOpen, totalPages, currentPage, stamp.documentType, stamp.prefix, stamp.number, metadata]);
 
-  const baseDocName = (filename || 'document').replace(/\.pdf$/i, '');
-  const cleanStampNum = stamp.number.replace(/[^\w-]/g, '_') || 'stamped';
-
-  const getSuggestedFilename = (pages: number[]) => {
-    const prefixTag = stamp.prefix ? stamp.prefix.replace(/[^\w-]/g, '').trim() + '_' : '';
-    if (pages.length === totalPages) {
-      return `${baseDocName}_${prefixTag}${cleanStampNum}.pdf`;
-    } else if (pages.length === 1) {
-      return `${baseDocName}_p${pages[0]}_${prefixTag}${cleanStampNum}.pdf`;
-    } else {
-      const pageListStr = pages.slice(0, 3).join('_');
-      const moreStr = pages.length > 3 ? `_and_${pages.length - 3}more` : '';
-      return `${baseDocName}_pages_${pageListStr}${moreStr}_${prefixTag}${cleanStampNum}.pdf`;
-    }
-  };
-
-  const [outputFilename, setOutputFilename] = useState<string>('');
-
+  // Update generated filename when activeDocType, stamp.number, customSubject, or selectedPages changes
   useEffect(() => {
-    if (selectedPages.length > 0) {
-      setOutputFilename(getSuggestedFilename(selectedPages));
+    if (isOpen && !isManualFilenameEdit) {
+      const generated = generateGovernmentFilename(stamp, metadata, {
+        docTypeOverride: activeDocType,
+        customSubject,
+        selectedPages: selectedPages.length > 0 ? selectedPages : [1],
+        totalPages,
+      });
+      setOutputFilename(generated);
     }
-  }, [selectedPages, totalPages, stamp.prefix, stamp.number]);
+  }, [activeDocType, stamp.number, customSubject, selectedPages, totalPages, metadata, isOpen, isManualFilenameEdit]);
 
   // Generate and render the actual stamped PDF page onto preview canvas
   useEffect(() => {
@@ -100,11 +125,9 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
       if (!sourceBytes) return;
       setIsPreviewLoading(true);
       try {
-        // Generate stamped PDF in memory
         const stampedBytes = await stampPdfDocument(sourceBytes.slice(0), stamp);
         if (!isMounted) return;
 
-        // Load into PDF.js
         const stampedPdf = await loadPdfDocument(stampedBytes);
         if (!isMounted) return;
 
@@ -179,23 +202,48 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
     }
   };
 
+  // Switch government document type and refresh filename
+  const handleDocTypeSelect = (docType: GovernmentDocType) => {
+    setActiveDocType(docType);
+    setIsManualFilenameEdit(false);
+    const generated = generateGovernmentFilename(stamp, metadata, {
+      docTypeOverride: docType,
+      customSubject,
+      selectedPages,
+      totalPages,
+    });
+    setOutputFilename(generated);
+  };
+
+  const handleResetFilename = () => {
+    setIsManualFilenameEdit(false);
+    const generated = generateGovernmentFilename(stamp, metadata, {
+      docTypeOverride: activeDocType,
+      customSubject,
+      selectedPages,
+      totalPages,
+    });
+    setOutputFilename(generated);
+  };
+
   const isAllSelected = selectedPages.length === totalPages;
+  const currentSeriesYear = extractSeriesYear(metadata?.series, metadata?.dates?.documentDate);
 
   return (
     <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 md:p-6 z-50 animate-in fade-in duration-150">
-      <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl relative border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-2xl max-w-5xl w-full max-h-[94vh] flex flex-col shadow-2xl relative border border-slate-200 overflow-hidden">
         {/* Modal Top Header */}
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
+        <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
               <Download className="w-4 h-4" />
             </div>
             <div>
               <h3 className="text-sm md:text-base font-bold text-slate-900">
-                Live Alignment Preview & PDF Download
+                Official Stamped PDF Download & Verification
               </h3>
               <p className="text-[11px] text-slate-500">
-                Inspect the actual generated PDF stamp alignment before downloading
+                Preview stamp alignment and generate government filename format: <code className="font-mono text-blue-700 bg-blue-50 px-1 py-0.5 rounded">[TYPE] [NUMBER] s [YEAR]-[SUBJECT]</code>
               </p>
             </div>
           </div>
@@ -208,7 +256,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
           </button>
         </div>
 
-        {/* Modal Body: Split 2-column on desktop (Left: Stamped PDF Canvas Preview, Right: Download Settings) */}
+        {/* Modal Body: Split 2-column on desktop (Left: Stamped PDF Canvas Preview, Right: Filename & Page Options) */}
         <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
           
           {/* LEFT: LIVE STAMPED PDF ALIGNMENT PREVIEW */}
@@ -308,11 +356,11 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
             </div>
 
             {/* Alignment Verification Tip Banner */}
-            <div className="p-2 bg-blue-50/80 border-t border-blue-200 flex items-center justify-between text-[11px] text-blue-900 shrink-0 px-3">
+            <div className="p-2.5 bg-blue-50/80 border-t border-blue-200 flex items-center justify-between text-[11px] text-blue-900 shrink-0 px-3">
               <span className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                 <span>
-                  <strong>100% Vector Output Verified:</strong> Stamp is rendered directly into the PDF stream.
+                  <strong>Vector Stamp Alignment:</strong> Verified directly on line <code>No. __________</code>
                 </span>
               </span>
               <span className="font-mono text-[10px] text-blue-700">
@@ -321,23 +369,101 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
             </div>
           </div>
 
-          {/* RIGHT: DOWNLOAD OPTIONS & PAGE SELECTION */}
-          <div className="w-full md:w-80 lg:w-92 p-4 bg-white flex flex-col justify-between overflow-y-auto shrink-0 space-y-4">
+          {/* RIGHT: FILENAME GENERATOR & PAGE SELECTION */}
+          <div className="w-full md:w-88 lg:w-96 p-4 bg-white flex flex-col justify-between overflow-y-auto shrink-0 space-y-4">
             <div className="space-y-4">
-              {/* Active Stamp Summary Badge */}
-              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs">
-                <span className="text-slate-600 font-medium">Stamp to bake:</span>
-                <span className="font-mono font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200 truncate max-w-[140px]">
-                  {stamp.prefix}{stamp.number}{stamp.suffix}
-                </span>
+              
+              {/* 1. GOVERNMENT FILENAME GENERATOR CARD */}
+              <div className="p-3 bg-gradient-to-br from-blue-50/80 via-white to-slate-50 border-2 border-blue-200 rounded-xl space-y-2.5 shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <FileCheck2 className="w-4 h-4 text-blue-600" />
+                    <span className="font-bold text-slate-900 text-xs">Generated Government Filename</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetFilename}
+                    className="text-[10px] text-blue-700 hover:text-blue-900 flex items-center gap-1 font-medium"
+                    title="Re-generate format"
+                  >
+                    <RotateCcw className="w-2.5 h-2.5" />
+                    <span>Auto-Format</span>
+                  </button>
+                </div>
+
+                {/* Document Type Selector Chips for Filename */}
+                <div>
+                  <span className="text-[10px] text-slate-500 font-semibold block mb-1">
+                    Select Document Type for Filename:
+                  </span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {GOVERNMENT_DOC_TYPES.map((type) => {
+                      const isSelected = activeDocType === type;
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => handleDocTypeSelect(type)}
+                          className={`py-1 px-1.5 rounded-md text-[10px] font-mono font-bold transition-all text-center border truncate ${
+                            isSelected
+                              ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                          title={`Generate with ${type}`}
+                        >
+                          {type}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Subject Component for Filename */}
+                <div>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-[10px] text-slate-500 font-semibold">Subject Component:</span>
+                    <span className="text-[9px] text-slate-400 font-mono">Series: s {currentSeriesYear}</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={customSubject}
+                    onChange={(e) => {
+                      setCustomSubject(e.target.value);
+                      setIsManualFilenameEdit(false);
+                    }}
+                    placeholder="e.g. Confirmation of Travel"
+                    className="w-full px-2 py-1 text-xs border border-slate-300 rounded bg-white focus:outline-none focus:border-blue-500 font-medium"
+                  />
+                </div>
+
+                {/* Filename Output Preview & Editable Field */}
+                <div>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-[10px] text-slate-700 font-bold">Generated Output Filename:</span>
+                    <span className="text-[9px] text-emerald-700 bg-emerald-50 px-1 rounded font-semibold">Ready to Save</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={outputFilename}
+                    onChange={(e) => {
+                      setOutputFilename(e.target.value);
+                      setIsManualFilenameEdit(true);
+                    }}
+                    className="w-full px-2.5 py-1.5 text-xs font-mono font-bold border-2 border-blue-400 rounded-lg focus:outline-none focus:border-blue-600 bg-white text-slate-900 shadow-2xs"
+                    placeholder="RSO 2544 s 2026-Confirmation of Travel.pdf"
+                  />
+                  <p className="text-[9px] text-slate-500 mt-1">
+                    Standard: <code className="font-mono text-slate-700">[TYPE] [NUMBER] s [YEAR]-[SUBJECT].pdf</code>
+                  </p>
+                </div>
               </div>
 
-              {/* Page Selection Controls */}
+              {/* 2. PAGE SELECTION CONTROLS */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Pages to Download:</span>
+                    <span>Pages to Include in Download:</span>
                   </label>
                   <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                     {selectedPages.length} of {totalPages} selected
@@ -375,7 +501,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                   <span className="text-[10px] text-slate-500 font-medium block">
                     Click page to include or exclude:
                   </span>
-                  <div className="grid grid-cols-4 gap-1.5 max-h-36 overflow-y-auto p-0.5">
+                  <div className="grid grid-cols-4 gap-1.5 max-h-32 overflow-y-auto p-0.5">
                     {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
                       const isSelected = selectedPages.includes(pageNum);
                       return (
@@ -410,20 +536,6 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                     className="w-full px-2.5 py-1 text-xs font-mono border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 bg-white"
                   />
                 </div>
-              </div>
-
-              {/* Output Filename */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                  Downloaded File Name:
-                </label>
-                <input
-                  type="text"
-                  value={outputFilename}
-                  onChange={(e) => setOutputFilename(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs font-mono border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 bg-white"
-                  placeholder="document_stamped.pdf"
-                />
               </div>
             </div>
 

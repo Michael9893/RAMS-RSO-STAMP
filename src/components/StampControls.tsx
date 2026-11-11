@@ -25,9 +25,12 @@ import {
   GOVERNMENT_DOCUMENT_TYPES,
   GOVERNMENT_STANDARD_STAMP,
 } from '../utils/pdfStamper';
+import { CategorizedDocumentInfo } from '../types/documentMetadata';
+import { generateGovernmentFilename } from '../utils/filenameGenerator';
 
 interface StampControlsProps {
   stamp: StampConfig;
+  metadata?: CategorizedDocumentInfo;
   currentPage: number;
   totalPages: number;
   isProcessing: boolean;
@@ -55,6 +58,7 @@ const QUICK_SYMBOLS = ['#', '-', '/', '_', '.', 'No.', '2026', '()'];
 
 export const StampControls: React.FC<StampControlsProps> = ({
   stamp,
+  metadata,
   currentPage,
   totalPages,
   isProcessing,
@@ -63,6 +67,7 @@ export const StampControls: React.FC<StampControlsProps> = ({
   onDownload,
 }) => {
   const [typedInput, setTypedInput] = useState(stamp.number);
+  const liveFilenamePreview = generateGovernmentFilename(stamp, metadata);
 
   // Keep typed input in sync when stamp.number is updated externally
   useEffect(() => {
@@ -151,42 +156,7 @@ export const StampControls: React.FC<StampControlsProps> = ({
 
       {/* Scrollable Control Settings */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs text-slate-700">
-        
-        {/* A. 1-CLICK OFFICIAL GOVERNMENT STANDARD PRESET */}
-        <div className={`p-3 rounded-xl border transition-all ${
-          isGovStandardActive
-            ? 'bg-blue-50/80 border-blue-300 ring-1 ring-blue-400/40'
-            : 'bg-gradient-to-r from-slate-50 to-blue-50/40 border-slate-200'
-        }`}>
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="flex items-center gap-1.5">
-              <Award className="w-4 h-4 text-blue-600" />
-              <span className="font-bold text-slate-900 text-xs">Official Government Format</span>
-            </div>
-            {isGovStandardActive ? (
-              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded flex items-center gap-1">
-                <Check className="w-3 h-3" /> Standard Active
-              </span>
-            ) : (
-              <span className="text-[10px] text-slate-500 font-medium">Standardized</span>
-            )}
-          </div>
-          <p className="text-[11px] text-slate-600 mb-2 leading-relaxed">
-            Professional format: <strong>15pt Courier Bold</strong>, <strong>Official Blue (#0038a8)</strong>, <strong>0.0° Horizontal</strong>, 6-digit zero-padded mechanical stamp.
-          </p>
-          <button
-            type="button"
-            onClick={handleApplyGovernmentStandard}
-            className={`w-full py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-2xs ${
-              isGovStandardActive
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-white hover:bg-blue-600 hover:text-white text-blue-700 border border-blue-300'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Apply Standard Government Format (15pt Blue)</span>
-          </button>
-        </div>
+
 
         {/* B. GOVERNMENT DOCUMENT TYPE SELECTION (RSO, MEMO ES/FWA, MEMO_ATT/ATA, RAO_RMC, U_MEMO, NOV) */}
         <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
@@ -257,6 +227,22 @@ export const StampControls: React.FC<StampControlsProps> = ({
                 placeholder='e.g. " - 2026"'
                 className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono bg-white focus:outline-none focus:border-blue-500"
               />
+            </div>
+          </div>
+
+          {/* Live Government Filename Preview */}
+          <div className="pt-1.5 border-t border-slate-200/80">
+            <div className="p-2 bg-blue-50/90 border border-blue-200 rounded-lg space-y-1">
+              <div className="flex items-center justify-between text-[10px] text-blue-900 font-semibold">
+                <span className="flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-blue-600" />
+                  <span>Download Filename Preview:</span>
+                </span>
+                <span className="text-[9px] text-blue-600 font-mono">Format: [TYPE] [NO] s [YR]-[SUBJ]</span>
+              </div>
+              <div className="font-mono text-[10px] font-bold text-slate-900 break-all bg-white p-1.5 rounded border border-blue-300 shadow-2xs">
+                {liveFilenamePreview}
+              </div>
             </div>
           </div>
         </div>
@@ -430,12 +416,21 @@ export const StampControls: React.FC<StampControlsProps> = ({
         </div>
 
         {/* F. TYPOGRAPHY & FRAME */}
-        <div className="space-y-3">
+        <div className="space-y-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
           <div>
-            <label className="font-semibold text-slate-800 block mb-1.5">
-              Stamp Typography Style
-            </label>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                <Type className="w-3.5 h-3.5 text-blue-600" />
+                <span>Stamp Typography</span>
+              </label>
+              {isGovStandardActive && (
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded flex items-center gap-1">
+                  <Check className="w-3 h-3" /> Standard Active
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5 mb-2">
               <button
                 onClick={() => onStampChange({ fontFamily: 'Courier' })}
                 className={`py-1.5 px-2 text-[11px] font-mono font-semibold rounded-md border text-center transition-colors ${
@@ -467,6 +462,22 @@ export const StampControls: React.FC<StampControlsProps> = ({
                 Formal Serif
               </button>
             </div>
+
+            {/* Simple button: Standard Government Format */}
+            <button
+              type="button"
+              onClick={handleApplyGovernmentStandard}
+              className={`w-full py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 border shadow-2xs ${
+                isGovStandardActive
+                  ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                  : 'bg-white hover:bg-blue-50 text-blue-700 hover:text-blue-800 border-blue-300'
+              }`}
+              title="Apply Standard Government Format: 15pt Courier Bold, Official Blue (#0038a8), 0.0° Horizontal"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Standard Government Format (15pt Blue)</span>
+              {isGovStandardActive && <Check className="w-3.5 h-3.5 text-white ml-0.5" />}
+            </button>
           </div>
 
           <div>

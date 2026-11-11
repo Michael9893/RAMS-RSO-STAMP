@@ -47,18 +47,17 @@ export function parseDocumentInfoFromExtractedText(
     }
   }
 
-  // 3. Extract Subject
-  let subject = 'GENERAL DOCUMENT';
-  const subjectMatch = fullText.match(/(?:SUBJECT|RE|REGARDING|TITLE)\s*:\s*([^\n\r]+)/i);
-  if (subjectMatch && subjectMatch[1]) {
-    subject = subjectMatch[1].trim();
-  } else if (lines.length > 2) {
-    // Pick first substantial line that isn't the title or number
+  // 3. Extract Subject - Always base the subject strictly at "SUBJECT:" or "SUBJ:"
+  let subject = extractSubjectFromPdfText(fullText);
+  if (!subject && lines.length > 2) {
+    // Fallback only if no explicit SUBJECT line exists
     const candidate = lines.find(
-      (l) => l !== title && !l.toLowerCase().includes('page') && l.length > 15
+      (l) => l !== title && !l.toLowerCase().includes('page') && l.length > 8 && !/^(no\.|series|annex)/i.test(l)
     );
     if (candidate) {
-      subject = candidate.slice(0, 100);
+      subject = candidate.slice(0, 80).trim();
+    } else {
+      subject = 'OFFICIAL ISSUANCE';
     }
   }
 
@@ -206,3 +205,139 @@ export function parseDocumentInfoFromExtractedText(
     tags: [documentType, series, 'Extracted PDF'],
   };
 }
+
+/**
+ * Common standard body delimiters in Philippine and government issuances
+ * that mark the end of the SUBJECT statement and the start of the body paragraph.
+ */
+const GOVERNMENT_BODY_DELIMITERS = [
+  'in the exigency of service',
+  'in the exigency of the service',
+  'in the interest of service',
+  'in the interest of the service',
+  'the above-mentioned personnel',
+  'the following officials',
+  'the following personnel',
+  'in view of',
+  'in line with',
+  'pursuant to',
+  'please be informed',
+  'please find',
+  'this is to authorize',
+  'this office hereby',
+  'this office',
+  'herewith is',
+  'relative to',
+  'this has reference',
+  'in accordance with',
+  'hereby authorized',
+  'authorized to travel',
+  'whereas,',
+  'whereas',
+  'notice is hereby',
+  'be it resolved',
+  'table of authorized',
+  'table of',
+  'particulars',
+  'amount fund source',
+  'name position',
+  'annex',
+  'date:',
+  'from:',
+  'to:',
+  'thru:',
+  'for:',
+  'memorandum',
+  'regional special order',
+];
+
+/**
+ * Extracts the exact subject from PDF text, always basing the subject
+ * strictly at the "SUBJECT:" anchor line as requested by the user.
+ *
+ * Example:
+ * Input: "SUBJECT: AUTHORITY TO TRAVEL In the exigency of service, Ms. Modesta L. Baguingan..."
+ * Output: "AUTHORITY TO TRAVEL"
+ */
+export function extractSubjectFromPdfText(fullText: string): string {
+  if (!fullText) return '';
+
+  // 1. Look for explicit "SUBJECT:" anchor (case-insensitive)
+  const subjectAnchorRegex = /(?:SUBJECT|SUBJ|SUBJECT\s+MATTER|RE|REGARDING)\s*[:\-–—]\s*/i;
+  const match = fullText.match(subjectAnchorRegex);
+
+  if (match && match.index !== undefined) {
+    const startIdx = match.index + match[0].length;
+    let candidate = fullText.slice(startIdx);
+
+    // If "SUBJECT:" was alone on a line, look at the immediate next non-empty line
+    const firstLineBreak = candidate.indexOf('\n');
+    const firstLine = firstLineBreak !== -1 ? candidate.slice(0, firstLineBreak).trim() : candidate.trim();
+
+    if (firstLine.length === 0) {
+      const remainingLines = candidate.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (remainingLines.length > 0) {
+        candidate = remainingLines[0];
+      }
+    } else {
+      candidate = firstLine;
+    }
+
+    // Stop before any government body paragraph opener that might have merged onto the same line
+    const lowerCandidate = candidate.toLowerCase();
+    let cutIndex = -1;
+
+    for (const delimiter of GOVERNMENT_BODY_DELIMITERS) {
+      const delimIdx = lowerCandidate.indexOf(delimiter);
+      if (delimIdx > 0 && (cutIndex === -1 || delimIdx < cutIndex)) {
+        cutIndex = delimIdx;
+      }
+    }
+
+    if (cutIndex > 0) {
+      candidate = candidate.slice(0, cutIndex);
+    }
+
+    // Clean up trailing and leading punctuation, quotes, underscores, asterisks
+    candidate = candidate
+      .replace(/^[\s:"'–—\-_]+/, '')
+      .replace(/[\s:"'–—\-_.;]+$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (candidate.length >= 3) {
+      return candidate;
+    }
+  }
+
+  // 2. Scan line-by-line in case "SUBJECT" has no colon (e.g. "SUBJECT AUTHORITY TO TRAVEL")
+  const lines = fullText.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const subjLineMatch = line.match(/^SUBJECT\s*[:\-–—]?\s*(.+)$/i);
+    if (subjLineMatch && subjLineMatch[1]) {
+      let subj = subjLineMatch[1].trim();
+      const lower = subj.toLowerCase();
+
+      for (const delimiter of GOVERNMENT_BODY_DELIMITERS) {
+        const dIdx = lower.indexOf(delimiter);
+        if (dIdx > 0) {
+          subj = subj.slice(0, dIdx);
+          break;
+        }
+      }
+
+      subj = subj
+        .replace(/^[\s:"'–—\-_]+/, '')
+        .replace(/[\s:"'–—\-_.;]+$/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (subj.length >= 3) {
+        return subj;
+      }
+    }
+  }
+
+  return '';
+}
+

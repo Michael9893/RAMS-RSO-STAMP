@@ -11,6 +11,7 @@ interface TopNavbarProps {
   onResetStamp: () => void;
   onOpenUploadModal: () => void;
   onLoadSample: () => void;
+  onLoadTravelSample?: () => void;
   onOpenMetadataModal: () => void;
 }
 
@@ -24,6 +25,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onResetStamp,
   onOpenUploadModal,
   onLoadSample,
+  onLoadTravelSample,
   onOpenMetadataModal,
 }) => {
   return (
@@ -52,11 +54,11 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
       </div>
 
       {/* Zone 2: Navigation & Quick Utilities */}
-      <nav className="flex items-center gap-2 md:gap-3">
+      <nav className="flex items-center gap-1.5 md:gap-2">
         <button
           onClick={onOpenUploadModal}
-          className="px-3 py-1.5 text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap"
-          title="Upload a new PDF document"
+          className="px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap"
+          title="Upload a new PDF or image document"
         >
           <Upload className="w-3.5 h-3.5 text-slate-500" />
           <span className="hidden sm:inline">Upload PDF</span>
@@ -64,12 +66,23 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
         <button
           onClick={onLoadSample}
-          className="px-3 py-1.5 text-xs font-medium text-blue-700 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap"
-          title="Load official sample document"
+          className="px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap border border-slate-200"
+          title="Load official DSWD Regional Special Order"
         >
           <FileText className="w-3.5 h-3.5 text-blue-600" />
-          <span className="hidden sm:inline">Sample Doc</span>
+          <span className="hidden sm:inline">RSO Sample</span>
         </button>
+
+        {onLoadTravelSample && (
+          <button
+            onClick={onLoadTravelSample}
+            className="px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100/80 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap border border-blue-200"
+            title="Load Authority to Travel Sample Document (Subject: AUTHORITY TO TRAVEL)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+            <span className="hidden sm:inline">Authority to Travel</span>
+          </button>
+        )}
 
         <button
           onClick={onOpenMetadataModal}

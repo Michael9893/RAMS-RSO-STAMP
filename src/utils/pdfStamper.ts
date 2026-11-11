@@ -324,6 +324,83 @@ export async function stampPdfDocument(
  * Creates a sample PDF containing the exact government memorandum from the user's uploaded attachment,
  * or a clean structured document vector layout as a fallback.
  */
+/**
+ * Safely embeds any image format into a PDFDocument.
+ * Attempts native pdf-lib PNG/JPG first, then falls back to browser canvas rasterization
+ * which seamlessly handles WebP, interlaced PNGs, indexed palettes, GIFs, and BMPs.
+ */
+export async function embedImageSafely(
+  pdfDoc: PDFDocument,
+  imageBytes: ArrayBuffer | Uint8Array
+) {
+  const rawBytes = imageBytes instanceof Uint8Array ? imageBytes : new Uint8Array(imageBytes);
+
+  // 1. Direct PNG embed
+  try {
+    return await pdfDoc.embedPng(rawBytes);
+  } catch {
+    // 2. Direct JPG embed
+    try {
+      return await pdfDoc.embedJpg(rawBytes);
+    } catch {
+      // 3. Fallback to HTML canvas rendering
+      if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+        return await new Promise<any>((resolve, reject) => {
+          const blob = new Blob([rawBytes.buffer as ArrayBuffer]);
+          const url = URL.createObjectURL(blob);
+          const img = new Image();
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = img.naturalWidth || img.width || 800;
+              canvas.height = img.naturalHeight || img.height || 1000;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                reject(new Error('Failed to get canvas 2d context'));
+                return;
+              }
+              ctx.fillStyle = '#FFFFFF';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, 0, 0);
+
+              canvas.toBlob(
+                async (blobResult) => {
+                  if (!blobResult) {
+                    reject(new Error('Canvas rasterization failed'));
+                    return;
+                  }
+                  try {
+                    const buf = await blobResult.arrayBuffer();
+                    const embedded = await pdfDoc.embedJpg(buf);
+                    resolve(embedded);
+                  } catch (e) {
+                    reject(e);
+                  }
+                },
+                'image/jpeg',
+                0.95
+              );
+            } catch (err) {
+              reject(err);
+            }
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Image failed to load in browser rasterizer'));
+          };
+          img.src = url;
+        });
+      }
+      throw new Error('Could not embed image into PDF document');
+    }
+  }
+}
+
+/**
+ * Creates the sample PDF document using the Regional Special Order asset
+ * or a clean structured document vector layout as a fallback.
+ */
 export async function createSampleDocumentPdf(): Promise<{ data: Uint8Array; filename: string }> {
   const pdfDoc = await PDFDocument.create();
   
@@ -331,12 +408,7 @@ export async function createSampleDocumentPdf(): Promise<{ data: Uint8Array; fil
     const response = await fetch('/assets/aistudio/image_f1584ad3.png');
     if (response.ok) {
       const imageBytes = await response.arrayBuffer();
-      let img;
-      try {
-        img = await pdfDoc.embedPng(imageBytes);
-      } catch {
-        img = await pdfDoc.embedJpg(imageBytes);
-      }
+      const img = await embedImageSafely(pdfDoc, imageBytes);
       
       // Standard A4 dimensions in points: 595.28 x 841.89
       const pageWidth = 595.28;
@@ -365,13 +437,110 @@ export async function createSampleDocumentPdf(): Promise<{ data: Uint8Array; fil
         width: renderW,
         height: renderH,
       });
-      
+
+      // Remove printed "00 2852" from the sample document line to provide a clean, blank line for stamping
+      const blankX = renderX + (154 / 1031) * renderW;
+      const blankW = (150 / 1031) * renderW;
+      const blankY = renderY + renderH - (286 / 812) * renderH;
+      const blankH = ((286 - 236) / 812) * renderH;
+
+      page.drawRectangle({
+        x: blankX - 2,
+        y: blankY - 1,
+        width: blankW + 4,
+        height: blankH + 2,
+        color: rgb(1, 1, 1),
+      });
+
+      // Redraw crisp underline matching the "No. ________" line
+      page.drawLine({
+        start: { x: blankX - 2, y: blankY },
+        end: { x: blankX + blankW + 4, y: blankY },
+        thickness: 0.8,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+
       const pdfBytes = await pdfDoc.save();
       return { data: pdfBytes, filename: 'Regional_Special_Order_DSWD.pdf' };
     }
   } catch (err) {
     console.warn('Could not load sample image from assets, generating vector sample:', err);
   }
+
+  // Fallback: Generate a crisp official document layout
+  return createFallbackSampleVectorPdf(pdfDoc);
+}
+
+/**
+ * Creates sample PDF containing the Authority to Travel memorandum (image_5839a483.png)
+ * with explicit subject "AUTHORITY TO TRAVEL".
+ */
+export async function createAuthorityToTravelSamplePdf(): Promise<{ data: Uint8Array; filename: string }> {
+  const pdfDoc = await PDFDocument.create();
+  try {
+    const response = await fetch('/assets/aistudio/image_5839a483.png');
+    if (response.ok) {
+      const imageBytes = await response.arrayBuffer();
+      const img = await embedImageSafely(pdfDoc, imageBytes);
+      const pageWidth = 595.28;
+      const pageHeight = 841.89;
+      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+      const margin = 20;
+      const availableW = pageWidth - margin * 2;
+      const availableH = pageHeight - margin * 2;
+      const imgAspect = img.width / img.height;
+      let renderW = availableW;
+      let renderH = availableW / imgAspect;
+      if (renderH > availableH) {
+        renderH = availableH;
+        renderW = availableH * imgAspect;
+      }
+      const renderX = (pageWidth - renderW) / 2;
+      const renderY = pageHeight - margin - renderH;
+      page.drawImage(img, {
+        x: renderX,
+        y: renderY,
+        width: renderW,
+        height: renderH,
+      });
+      const pdfBytes = await pdfDoc.save();
+      return { data: pdfBytes, filename: 'Authority_to_Travel_Order.pdf' };
+    }
+  } catch (err) {
+    console.warn('Failed to load image_5839a483.png:', err);
+  }
+  return createSampleDocumentPdf();
+}
+
+/**
+ * Converts any user-uploaded image file into a standardized printable PDF.
+ */
+export async function convertImageToPdfBytes(
+  imageBytes: ArrayBuffer | Uint8Array,
+  filename: string
+): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.create();
+  const img = await embedImageSafely(pdfDoc, imageBytes);
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const page = pdfDoc.addPage([pageWidth, pageHeight]);
+  const margin = 20;
+  const availableW = pageWidth - margin * 2;
+  const availableH = pageHeight - margin * 2;
+  const imgAspect = img.width / img.height;
+  let renderW = availableW;
+  let renderH = availableW / imgAspect;
+  if (renderH > availableH) {
+    renderH = availableH;
+    renderW = availableH * imgAspect;
+  }
+  const renderX = (pageWidth - renderW) / 2;
+  const renderY = pageHeight - margin - renderH;
+  page.drawImage(img, { x: renderX, y: renderY, width: renderW, height: renderH });
+  return await pdfDoc.save();
+}
+
+async function createFallbackSampleVectorPdf(pdfDoc: PDFDocument): Promise<{ data: Uint8Array; filename: string }> {
 
   // Fallback: Generate a crisp official document layout
   const page = pdfDoc.addPage([595.28, 841.89]);

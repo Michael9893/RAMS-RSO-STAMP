@@ -11,6 +11,8 @@ try {
   pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 }
 
+import { PDFDocument } from 'pdf-lib';
+
 export interface RenderedPageInfo {
   pageNumber: number;
   width: number;
@@ -19,18 +21,66 @@ export interface RenderedPageInfo {
   originalHeight: number;
 }
 
+/**
+ * Searches the first 4096 bytes for the "%PDF" magic signature (0x25, 0x50, 0x44, 0x46).
+ * Returns the byte index of the start of the PDF header, or -1 if not found.
+ */
+export function findPdfHeaderOffset(bytes: Uint8Array): number {
+  const limit = Math.min(bytes.length - 4, 4096);
+  for (let i = 0; i <= limit; i++) {
+    if (
+      bytes[i] === 0x25 && // %
+      bytes[i + 1] === 0x50 && // P
+      bytes[i + 2] === 0x44 && // D
+      bytes[i + 3] === 0x46 // F
+    ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 export async function loadPdfDocument(data: ArrayBuffer | Uint8Array) {
+  let rawBytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+
+  // 1. Strip any leading Byte Order Mark (BOM), whitespace, or scanner headers before %PDF
+  const offset = findPdfHeaderOffset(rawBytes);
+  if (offset > 0) {
+    rawBytes = rawBytes.subarray(offset);
+  }
+
   // Always clone the incoming data so that PDF.js worker transfer never detaches the original buffer
-  const rawBytes = data instanceof Uint8Array ? data : new Uint8Array(data);
   const clonedBytes = new Uint8Array(rawBytes.byteLength);
   clonedBytes.set(rawBytes);
 
-  const loadingTask = pdfjsLib.getDocument({
-    data: clonedBytes,
-    cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
-    cMapPacked: true,
-  });
-  return await loadingTask.promise;
+  try {
+    const loadingTask = pdfjsLib.getDocument({
+      data: clonedBytes,
+      cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
+      cMapPacked: true,
+    });
+    return await loadingTask.promise;
+  } catch (err: any) {
+    console.warn('PDF.js initial parse failed, attempting pdf-lib structural repair:', err?.message || err);
+
+    // 2. Self-repair attempt using pdf-lib: re-saves the document to rebuild corrupted XRef tables
+    try {
+      const repairDoc = await PDFDocument.load(rawBytes, {
+        ignoreEncryption: true,
+        throwOnInvalidObject: false,
+      });
+      const repairedBytes = await repairDoc.save();
+      const retryTask = pdfjsLib.getDocument({
+        data: repairedBytes,
+        cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
+        cMapPacked: true,
+      });
+      return await retryTask.promise;
+    } catch (repairErr) {
+      console.error('PDF structural repair also failed:', repairErr);
+      throw err;
+    }
+  }
 }
 
 export async function renderPdfPageToCanvas(
@@ -123,12 +173,45 @@ export async function extractFullTextFromPdf(pdfDoc: pdfjsLib.PDFDocumentProxy):
     try {
       const page = await pdfDoc.getPage(i);
       const textContent = await page.getTextContent();
-      const strings = textContent.items
-        .map((item) => ('str' in item ? (item as { str: string }).str : ''))
-        .filter((s) => s.trim().length > 0);
-      const pageStr = strings.join(' ');
-      pagesText.push({ pageNumber: i, text: pageStr });
-      combined += (combined ? '\n\n' : '') + `[PAGE ${i}]\n` + pageStr;
+      
+      let pageStr = '';
+      let lastY: number | null = null;
+
+      for (const item of textContent.items) {
+        if ('str' in item) {
+          const textItem = item as { str: string; hasEOL?: boolean; transform?: number[] };
+          const str = textItem.str;
+          if (!str && !textItem.hasEOL) continue;
+
+          const transform = textItem.transform;
+          const currentY = transform && transform.length >= 6 ? transform[5] : null;
+          const hasEOL = Boolean(textItem.hasEOL);
+
+          const isNewline =
+            hasEOL ||
+            (lastY !== null && currentY !== null && Math.abs(currentY - lastY) > 4);
+
+          if (isNewline) {
+            if (pageStr.length > 0 && !pageStr.endsWith('\n')) {
+              pageStr += '\n';
+            }
+            pageStr += str;
+          } else {
+            if (pageStr.length > 0 && !pageStr.endsWith('\n') && !pageStr.endsWith(' ') && str.length > 0) {
+              pageStr += ' ';
+            }
+            pageStr += str;
+          }
+
+          if (currentY !== null) {
+            lastY = currentY;
+          }
+        }
+      }
+
+      const trimmedPageStr = pageStr.trim();
+      pagesText.push({ pageNumber: i, text: trimmedPageStr });
+      combined += (combined ? '\n\n' : '') + `[PAGE ${i}]\n` + trimmedPageStr;
     } catch (e) {
       console.warn(`Error extracting text from page ${i}:`, e);
     }

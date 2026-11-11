@@ -142,3 +142,68 @@ export const DEFAULT_DSWD_METADATA: CategorizedDocumentInfo = {
   notes: 'Authority to travel on official business time. Travel expenses and registration covered under official credit coop representation.',
   tags: ['Special Order', 'Official Travel', 'DSWD FO-I', 'Annex I.1', '2026'],
 };
+
+export const MODESTA_TRAVEL_VERBATIM_TEXT = `SUBJECT: AUTHORITY TO TRAVEL
+
+In the exigency of service, Ms. Modesta L. Baguingan, Project Development Officer II of the Promotive Services Division under Sustainable Livelihood Program, is hereby authorized to travel on 10 November 2026 (inclusive of travel time) at Puerto De San Juan Beach Resort Hotel, Ili Sur, San Juan, La Union to facilitate the conduct bookkeeping training to 7 SLPAs of San Juan, La Union.
+
+The above-mentioned personnel is authorized to claim travelling expenses¹ through reimbursement based on actual cost incurred OR cash advance based on the estimated Itinerary of Travel subject to actual liquidation of cost incurred, related in the performance of the said official activity upon submission of complete documentary requirements subject to the usual government accounting and auditing rules and regulations.
+
+Further, she is entitled to claim Hazard Pay, subject to availability of funds and usual accounting and auditing rules and regulations.
+
+TABLE OF PARTICULARS:
+| Particulars | Amount | Fund Source |
+| Hazard Pay | N/A | N/A |
+
+It is further understood that the duly-signed Certificate of Appearance/Attendance/Participation from the place visited and other documentary evidence...`;
+
+export const DEFAULT_MODESTA_METADATA: CategorizedDocumentInfo = {
+  title: 'AUTHORITY TO TRAVEL ORDER',
+  subject: 'AUTHORITY TO TRAVEL',
+  documentType: 'MEMO_ATT/ATA',
+  documentNumber: '002852',
+  series: 'Series of 2026',
+  annexRef: 'MEMO-ATT-2026',
+  headerLogosText: 'Department of Social Welfare and Development · Sustainable Livelihood Program',
+  bodyParagraph:
+    'In the exigency of service, Ms. Modesta L. Baguingan, Project Development Officer II of the Promotive Services Division under Sustainable Livelihood Program, is hereby authorized to travel on 10 November 2026 (inclusive of travel time) at Puerto De San Juan Beach Resort Hotel, Ili Sur, San Juan, La Union to facilitate the conduct bookkeeping training to 7 SLPAs of San Juan, La Union.',
+  issuanceLocation: 'Issued at DSWD Field Office I in the City of San Fernando, La Union.',
+  tableHeaders: ['Particulars', 'Amount', 'Fund Source'],
+  dates: {
+    documentDate: '2026-11-10',
+    effectiveDateRange: '10 November 2026 (inclusive of travel time)',
+    stampedDate: new Date().toISOString().split('T')[0],
+  },
+  personnel: [
+    {
+      id: 'p1',
+      name: 'Ms. Modesta L. Baguingan',
+      position: 'Project Development Officer II',
+      division: 'Promotive Services Division (Sustainable Livelihood Program)',
+      classification: 'Official Travel',
+    },
+  ],
+  approval: {
+    approvedBy: 'Regional Director / Authorized Official',
+    approverPosition: 'Regional Director',
+    issuingOffice: 'DSWD Field Office I, City of San Fernando, La Union',
+    annexRef: 'MEMO-ATT-2026',
+  },
+  event: {
+    purpose: 'Facilitate the conduct bookkeeping training to 7 SLPAs of San Juan, La Union',
+    venue: 'Puerto De San Juan Beach Resort Hotel, Ili Sur, San Juan, La Union',
+  },
+  fullVerbatimText: MODESTA_TRAVEL_VERBATIM_TEXT,
+  pagesText: [{ pageNumber: 1, text: MODESTA_TRAVEL_VERBATIM_TEXT }],
+  technical: {
+    filename: 'Authority_to_Travel_Order.pdf',
+    fileSizeBytes: 198400,
+    fileSizeFormatted: '194 KB',
+    totalPages: 1,
+    dimensions: '595.28 × 841.89 pt (A4 Standard)',
+    pdfVersion: '1.7',
+  },
+  notes: 'Travel order for bookkeeping training facilitation. Travelling expenses authorized through reimbursement or cash advance.',
+  tags: ['Authority to Travel', 'SLPA Training', 'Modesta Baguingan', 'San Juan La Union', '2026'],
+};
+

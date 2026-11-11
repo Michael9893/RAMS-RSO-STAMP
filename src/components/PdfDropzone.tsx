@@ -30,9 +30,7 @@ export const PdfDropzone: React.FC<PdfDropzoneProps> = ({
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        onFileSelected(file);
-      }
+      onFileSelected(file);
     }
   };
 
@@ -72,7 +70,7 @@ export const PdfDropzone: React.FC<PdfDropzoneProps> = ({
           type="file"
           ref={fileInputRef}
           onChange={handleFileChange}
-          accept="application/pdf"
+          accept="application/pdf,image/*,.pdf,.png,.jpg,.jpeg,.webp"
           className="hidden"
         />
 

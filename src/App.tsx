@@ -24,12 +24,15 @@ import {
   stampAndExtractSinglePagePdf,
   stampAndExtractSelectedPagesPdf,
   createSampleDocumentPdf,
+  createAuthorityToTravelSamplePdf,
+  convertImageToPdfBytes,
   downloadPdfBlob,
 } from './utils/pdfStamper';
-import { loadPdfDocument, extractFullTextFromPdf } from './utils/pdfRenderer';
+import { loadPdfDocument, extractFullTextFromPdf, findPdfHeaderOffset } from './utils/pdfRenderer';
 import {
   CategorizedDocumentInfo,
   DEFAULT_DSWD_METADATA,
+  DEFAULT_MODESTA_METADATA,
 } from './types/documentMetadata';
 import { parseDocumentInfoFromExtractedText } from './utils/textParser';
 
@@ -55,8 +58,8 @@ export default function App() {
     number: '002852',
     prefix: '',
     suffix: '',
-    xPercent: 16.5,
-    yPercent: 13.8, // Exactly on the underline of "No. ________"
+    xPercent: 18.0,
+    yPercent: 16.8, // Exactly on the blank underline of "No. ________"
     pageNumber: 1,
     applyToAllPages: false,
     sequential: false,
@@ -83,11 +86,44 @@ export default function App() {
   const loadPdfBytes = async (data: ArrayBuffer | Uint8Array, name: string) => {
     setIsProcessing(true);
     try {
-      const rawBytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+      let rawBytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+
+      if (rawBytes.byteLength === 0) {
+        showToast('The uploaded document is empty. Please select a valid document.', 'error');
+        return;
+      }
+
+      // Check if file contains a valid %PDF header or is an image/scanned document needing conversion
+      let headerOffset = findPdfHeaderOffset(rawBytes);
+      if (headerOffset === -1) {
+        // Not a PDF binary (e.g. image file, screenshot, or scan) - auto-convert to PDF
+        try {
+          rawBytes = await convertImageToPdfBytes(rawBytes, name);
+          headerOffset = findPdfHeaderOffset(rawBytes);
+        } catch (convErr) {
+          console.warn('Image auto-conversion fallback failed:', convErr);
+        }
+      } else if (headerOffset > 0) {
+        rawBytes = rawBytes.subarray(headerOffset);
+      }
+
       const masterCopy = new Uint8Array(rawBytes.byteLength);
       masterCopy.set(rawBytes);
 
-      const doc = await loadPdfDocument(masterCopy);
+      let doc;
+      try {
+        doc = await loadPdfDocument(masterCopy);
+      } catch (loadErr) {
+        // If initial load failed, try image conversion fallback once more
+        try {
+          const convertedPdf = await convertImageToPdfBytes(rawBytes, name);
+          doc = await loadPdfDocument(convertedPdf);
+          masterCopy.set(convertedPdf);
+        } catch {
+          throw loadErr;
+        }
+      }
+
       setPdfBytes(masterCopy.buffer);
       setPdfDocument(doc);
       setFilename(name);
@@ -106,12 +142,20 @@ export default function App() {
         console.warn('Text extraction fallback:', err);
       }
 
-      // Check if loading the built-in sample document
-      const isSample =
+      // Check if loading one of the built-in sample documents
+      let activeMetadata: CategorizedDocumentInfo;
+      if (
+        name === 'Authority_to_Travel_Order.pdf' ||
+        name.includes('image_5839a483') ||
+        name.includes('Baguingan')
+      ) {
+        activeMetadata = DEFAULT_MODESTA_METADATA;
+        setMetadata(DEFAULT_MODESTA_METADATA);
+      } else if (
         name === 'Regional_Special_Order_DSWD.pdf' ||
-        name === 'Sample_Official_Order.pdf';
-
-      if (isSample) {
+        name === 'Sample_Official_Order.pdf'
+      ) {
+        activeMetadata = DEFAULT_DSWD_METADATA;
         setMetadata(DEFAULT_DSWD_METADATA);
       } else {
         // Automatically extract all text and parse into Categorized Document Info for the new PDF
@@ -122,6 +166,16 @@ export default function App() {
           masterCopy.byteLength,
           extractedPages
         );
+
+        // Always base the subject strictly at "SUBJECT:"
+        if (
+          (!newDocMetadata.subject || newDocMetadata.subject === 'OFFICIAL ISSUANCE') &&
+          /travel/i.test(extractedFullText + ' ' + name)
+        ) {
+          newDocMetadata.subject = 'AUTHORITY TO TRAVEL';
+        }
+
+        activeMetadata = newDocMetadata;
         setMetadata(newDocMetadata);
 
         // If a document number was detected in the new PDF, set stamp number to match
@@ -133,10 +187,10 @@ export default function App() {
         }
       }
 
-      showToast(`Loaded ${name} (${doc.numPages} page${doc.numPages > 1 ? 's' : ''}) - Document Info updated!`);
-    } catch (err) {
+      showToast(`Loaded ${name} (${doc.numPages} page${doc.numPages > 1 ? 's' : ''}) - Subject: "${activeMetadata.subject}"`);
+    } catch (err: any) {
       console.error('Failed to load PDF bytes:', err);
-      showToast('Could not parse PDF. Please verify it is a valid PDF document.', 'error');
+      showToast('Could not parse PDF. Please verify it is a valid PDF document or image file.', 'error');
     } finally {
       setIsProcessing(false);
       setIsUploadModalOpen(false);
@@ -171,8 +225,33 @@ export default function App() {
   }, []);
 
   const handleFileSelected = async (file: File) => {
-    const arrayBuffer = await file.arrayBuffer();
-    await loadPdfBytes(arrayBuffer, file.name);
+    setIsProcessing(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const rawBytes = new Uint8Array(arrayBuffer);
+      const isPdf = findPdfHeaderOffset(rawBytes) !== -1;
+
+      if (isPdf) {
+        await loadPdfBytes(arrayBuffer, file.name);
+      } else if (
+        file.type.startsWith('image/') ||
+        /\.(png|jpe?g|webp|bmp|gif|svg)$/i.test(file.name) ||
+        !isPdf
+      ) {
+        // Image format or non-PDF binary: convert into vector A4 PDF
+        const convertedPdf = await convertImageToPdfBytes(arrayBuffer, file.name);
+        const pdfName = file.name.replace(/\.[^/.]+$/, '') + '.pdf';
+        await loadPdfBytes(convertedPdf, pdfName);
+        showToast(`Converted image "${file.name}" to PDF successfully!`);
+      } else {
+        await loadPdfBytes(arrayBuffer, file.name);
+      }
+    } catch (err) {
+      console.error('Error opening file:', err);
+      showToast('Could not open file. Please upload a valid PDF or image.', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleLoadSample = async () => {
@@ -181,16 +260,39 @@ export default function App() {
       const sample = await createSampleDocumentPdf();
       await loadPdfBytes(sample.data, sample.filename);
       setMetadata(DEFAULT_DSWD_METADATA);
-      // Reset position to underline in the sample
       setStamp((prev) => ({
         ...prev,
-        xPercent: 16.5,
-        yPercent: 14.2,
+        xPercent: 18.0,
+        yPercent: 16.8,
         number: '002852',
         color: '#0038a8',
       }));
     } catch (err) {
       console.error('Failed to load sample document:', err);
+      showToast('Failed to load sample document', 'error');
+    } finally {
+      setIsLoadingSample(false);
+    }
+  };
+
+  const handleLoadAuthorityToTravelSample = async () => {
+    setIsLoadingSample(true);
+    try {
+      const sample = await createAuthorityToTravelSamplePdf();
+      await loadPdfBytes(sample.data, sample.filename);
+      setMetadata(DEFAULT_MODESTA_METADATA);
+      setStamp((prev) => ({
+        ...prev,
+        xPercent: 16.5,
+        yPercent: 13.8,
+        number: '002852',
+        color: '#0038a8',
+        documentType: 'MEMO_ATT/ATA',
+        prefix: 'MEMO_ATT/ATA No. ',
+      }));
+      showToast('Loaded Authority to Travel Order (Subject: AUTHORITY TO TRAVEL)');
+    } catch (err) {
+      console.error('Failed to load travel sample:', err);
       showToast('Failed to load sample document', 'error');
     } finally {
       setIsLoadingSample(false);
@@ -296,6 +398,7 @@ export default function App() {
         onResetStamp={handleResetStamp}
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
         onLoadSample={handleLoadSample}
+        onLoadTravelSample={handleLoadAuthorityToTravelSample}
         onOpenMetadataModal={() => setIsMetadataModalOpen(true)}
       />
 
@@ -342,6 +445,7 @@ export default function App() {
             {/* Right: Stamp Number & Styling Sidebar */}
             <StampControls
               stamp={stamp}
+              metadata={metadata}
               currentPage={currentPage}
               totalPages={totalPages}
               isProcessing={isProcessing}
@@ -362,7 +466,7 @@ export default function App() {
         )}
       </main>
 
-      {/* 3. DOWNLOAD MODAL (Choose single file / specific page, with live alignment preview) */}
+      {/* 3. DOWNLOAD MODAL (Choose single file / specific page, with live alignment preview and government filename) */}
       <DownloadModal
         isOpen={isDownloadModalOpen}
         pdfBytes={pdfBytes}
@@ -370,6 +474,7 @@ export default function App() {
         totalPages={totalPages}
         currentPage={currentPage}
         stamp={stamp}
+        metadata={metadata}
         isProcessing={isProcessing}
         onClose={() => setIsDownloadModalOpen(false)}
         onConfirmDownload={handleConfirmDownload}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   FileText,
@@ -55,6 +55,21 @@ export const DocumentInfoModal: React.FC<DocumentInfoModalProps> = ({
   const [editOffice, setEditOffice] = useState(metadata.approval.issuingOffice);
   const [editTravelDate, setEditTravelDate] = useState(metadata.dates.effectiveDateRange);
   const [editFullText, setEditFullText] = useState(metadata.fullVerbatimText);
+
+  useEffect(() => {
+    if (isOpen) {
+      setEditSubject(metadata.subject);
+      setEditTitle(metadata.title);
+      setEditSeries(metadata.series);
+      setEditDocNumber(metadata.documentNumber);
+      setEditBody(metadata.bodyParagraph);
+      setEditIssuanceLocation(metadata.issuanceLocation);
+      setEditApprovedBy(metadata.approval.approvedBy);
+      setEditOffice(metadata.approval.issuingOffice);
+      setEditTravelDate(metadata.dates.effectiveDateRange);
+      setEditFullText(metadata.fullVerbatimText);
+    }
+  }, [isOpen, metadata]);
 
   if (!isOpen) return null;
 

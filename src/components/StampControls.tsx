@@ -28,17 +28,25 @@ import {
   GOVERNMENT_STANDARD_STAMP,
 } from '../utils/pdfStamper';
 import { CategorizedDocumentInfo } from '../types/documentMetadata';
-import { generateGovernmentFilename, GOVERNMENT_DOC_TYPES, GovernmentDocType } from '../utils/filenameGenerator';
+import {
+  generateGovernmentFilename,
+  GOVERNMENT_DOC_TYPES,
+  GovernmentDocType,
+  PRESET_FILENAME_SUBJECTS,
+  toSentenceCase,
+} from '../utils/filenameGenerator';
 import { RecentTrackerState, formatRelativeTime } from '../utils/recentTracker';
 
 interface StampControlsProps {
   stamp: StampConfig;
   metadata?: CategorizedDocumentInfo;
+  pdfSubject?: string;
   trackerState?: RecentTrackerState;
   currentPage: number;
   totalPages: number;
   isProcessing: boolean;
   onStampChange: (updated: Partial<StampConfig>) => void;
+  onSubjectChange?: (subject: string) => void;
   onStampNudge: (deltaX: number, deltaY: number) => void;
   onDownload: () => void;
   onOpenTrackerModal?: () => void;
@@ -65,18 +73,27 @@ const QUICK_SYMBOLS = ['#', '-', '/', '_', '.', 'No.', '2026', '()'];
 export const StampControls: React.FC<StampControlsProps> = ({
   stamp,
   metadata,
+  pdfSubject,
   trackerState,
   currentPage,
   totalPages,
   isProcessing,
   onStampChange,
+  onSubjectChange,
   onStampNudge,
   onDownload,
   onOpenTrackerModal,
   onUseTrackedNumber,
 }) => {
   const [typedInput, setTypedInput] = useState(stamp.number);
-  const liveFilenamePreview = generateGovernmentFilename(stamp, metadata);
+  const liveFilenamePreview = generateGovernmentFilename(stamp, metadata, {
+    totalPages,
+  });
+  const activeSubjectText = metadata?.subject || pdfSubject || '';
+  const sentencePdfSubject = pdfSubject ? toSentenceCase(pdfSubject) : '';
+  const isSubjectCustomized =
+    Boolean(sentencePdfSubject) &&
+    toSentenceCase(activeSubjectText) !== sentencePdfSubject;
 
   // Keep typed input in sync when stamp.number is updated externally
   useEffect(() => {
@@ -242,7 +259,7 @@ export const StampControls: React.FC<StampControlsProps> = ({
 
           {/* Live Government Filename Preview */}
           <div className="pt-1.5 border-t border-slate-200/80">
-            <div className="p-2 bg-blue-50/90 border border-blue-200 rounded-lg space-y-1">
+            <div className="p-2.5 bg-blue-50/90 border border-blue-200 rounded-lg space-y-1.5">
               <div className="flex items-center justify-between text-[10px] text-blue-900 font-semibold">
                 <span className="flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-blue-600" />
@@ -250,8 +267,71 @@ export const StampControls: React.FC<StampControlsProps> = ({
                 </span>
                 <span className="text-[9px] text-blue-600 font-mono">Format: [TYPE] [NO] s [YR]-[SUBJ]</span>
               </div>
+
               <div className="font-mono text-[10px] font-bold text-slate-900 break-all bg-white p-1.5 rounded border border-blue-300 shadow-2xs">
                 {liveFilenamePreview}
+              </div>
+
+              {/* PDF Subject source verification & quick adjustment */}
+              <div className="pt-0.5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-semibold text-blue-900/80">
+                    Subject (based on PDF Subject):
+                  </span>
+                  {isSubjectCustomized && onSubjectChange && pdfSubject && (
+                    <button
+                      type="button"
+                      onClick={() => onSubjectChange(pdfSubject)}
+                      className="text-[9px] font-semibold text-blue-700 hover:text-blue-900 flex items-center gap-0.5 underline"
+                      title={`Restore extracted PDF subject: ${sentencePdfSubject}`}
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" />
+                      <span>Use PDF Subject</span>
+                    </button>
+                  )}
+                </div>
+                {onSubjectChange ? (
+                  <>
+                    <input
+                      type="text"
+                      value={activeSubjectText}
+                      onChange={(e) => onSubjectChange(e.target.value)}
+                      placeholder="Extracted from PDF Subject..."
+                      className="w-full px-2 py-1 text-[11px] bg-white border border-blue-200 rounded focus:outline-none focus:border-blue-500 text-slate-800 font-medium"
+                    />
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-semibold text-blue-900/75 block">
+                        Quick Select Subject:
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {PRESET_FILENAME_SUBJECTS.map((preset) => {
+                          const isSelected =
+                            toSentenceCase(activeSubjectText) === toSentenceCase(preset);
+                          return (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => onSubjectChange(toSentenceCase(preset))}
+                              className={`px-2 py-1 rounded text-[10px] font-medium border text-left transition-colors flex items-center gap-1 ${
+                                isSelected
+                                  ? 'bg-blue-600 text-white border-blue-700 shadow-2xs font-semibold'
+                                  : 'bg-white hover:bg-blue-100/70 text-slate-700 border-blue-200'
+                              }`}
+                              title={`Set subject to "${toSentenceCase(preset)}"`}
+                            >
+                              {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
+                              <span>{preset}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-[10px] text-slate-700 font-medium truncate">
+                    {toSentenceCase(activeSubjectText || 'Official issuance')}
+                  </div>
+                )}
               </div>
             </div>
           </div>

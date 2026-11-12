@@ -21,6 +21,7 @@ import {
   generateGovernmentFilename,
   GOVERNMENT_DOC_TYPES,
   GovernmentDocType,
+  PRESET_FILENAME_SUBJECTS,
   detectGovernmentDocType,
   extractSeriesYear,
   toSentenceCase,
@@ -34,6 +35,7 @@ interface DownloadModalProps {
   currentPage: number;
   stamp: StampConfig;
   metadata?: CategorizedDocumentInfo;
+  pdfSubject?: string;
   isProcessing: boolean;
   onClose: () => void;
   onConfirmDownload: (
@@ -52,6 +54,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   currentPage,
   stamp,
   metadata,
+  pdfSubject,
   isProcessing,
   onClose,
   onConfirmDownload,
@@ -64,7 +67,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   const initialDocType = detectGovernmentDocType(stamp, metadata);
   const [activeDocType, setActiveDocType] = useState<GovernmentDocType>(initialDocType);
   const [customSubject, setCustomSubject] = useState<string>(
-    toSentenceCase(metadata?.subject || 'Authority to travel on official time')
+    toSentenceCase(metadata?.subject || pdfSubject || 'Official issuance')
   );
   const [outputFilename, setOutputFilename] = useState<string>('');
   const [isManualFilenameEdit, setIsManualFilenameEdit] = useState<boolean>(false);
@@ -78,36 +81,46 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
-  // Initialize selected pages and doc type when modal opens
+  // Initialize selected pages, doc type, and PDF-derived subject when modal opens
   useEffect(() => {
     if (isOpen) {
       setPreviewPageNumber(currentPage || 1);
       const detected = detectGovernmentDocType(stamp, metadata);
       setActiveDocType(detected);
-      if (metadata?.subject) {
-        setCustomSubject(toSentenceCase(metadata.subject));
-      }
 
-      if (totalPages <= 1) {
-        setSelectedPages([1]);
-        setRangeInput('1');
-      } else {
-        const all = Array.from({ length: totalPages }, (_, i) => i + 1);
-        setSelectedPages(all);
-        setRangeInput(`1-${totalPages}`);
-      }
+      const resolvedSubject = toSentenceCase(
+        metadata?.subject || pdfSubject || 'Official issuance'
+      );
+      setCustomSubject(resolvedSubject);
 
-      // Generate initial standard government filename
+      const initialPages =
+        totalPages <= 1
+          ? [1]
+          : Array.from({ length: totalPages }, (_, i) => i + 1);
+
+      setSelectedPages(initialPages);
+      setRangeInput(totalPages <= 1 ? '1' : `1-${totalPages}`);
+
+      // Generate initial standard government filename based on PDF Subject
       const generated = generateGovernmentFilename(stamp, metadata, {
         docTypeOverride: detected,
-        customSubject: metadata?.subject,
-        selectedPages: totalPages > 1 ? Array.from({ length: totalPages }, (_, i) => i + 1) : [1],
+        customSubject: resolvedSubject,
+        selectedPages: initialPages,
         totalPages,
       });
       setOutputFilename(generated);
       setIsManualFilenameEdit(false);
     }
-  }, [isOpen, totalPages, currentPage, stamp.documentType, stamp.prefix, stamp.number, metadata]);
+  }, [
+    isOpen,
+    totalPages,
+    currentPage,
+    stamp.documentType,
+    stamp.prefix,
+    stamp.number,
+    metadata,
+    pdfSubject,
+  ]);
 
   // Update generated filename when activeDocType, stamp.number, customSubject, or selectedPages changes
   useEffect(() => {
@@ -427,10 +440,29 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                 </div>
 
                 {/* Subject Component for Filename */}
-                <div>
+                <div className="space-y-1.5">
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[10px] text-slate-500 font-semibold">Subject Component:</span>
-                    <span className="text-[9px] text-slate-400 font-mono">Series: s {currentSeriesYear}</span>
+                    <span className="text-[10px] text-slate-500 font-semibold">
+                      Subject Component (from PDF):
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {pdfSubject &&
+                        toSentenceCase(customSubject) !== toSentenceCase(pdfSubject) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomSubject(toSentenceCase(pdfSubject));
+                              setIsManualFilenameEdit(false);
+                            }}
+                            className="text-[9px] text-blue-700 hover:text-blue-900 font-semibold underline"
+                          >
+                            Use PDF Subject
+                          </button>
+                        )}
+                      <span className="text-[9px] text-slate-400 font-mono">
+                        Series: s {currentSeriesYear}
+                      </span>
+                    </div>
                   </div>
                   <input
                     type="text"
@@ -439,9 +471,39 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                       setCustomSubject(e.target.value);
                       setIsManualFilenameEdit(false);
                     }}
-                    placeholder="e.g. Confirmation of travel"
+                    placeholder="e.g. Official station"
                     className="w-full px-2 py-1 text-xs border border-slate-300 rounded bg-white focus:outline-none focus:border-blue-500 font-medium"
                   />
+                  <div className="space-y-1">
+                    <span className="text-[9px] text-slate-500 font-semibold block">
+                      Select Preset Subject:
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {PRESET_FILENAME_SUBJECTS.map((preset) => {
+                        const isSelected =
+                          toSentenceCase(customSubject) === toSentenceCase(preset);
+                        return (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => {
+                              setCustomSubject(toSentenceCase(preset));
+                              setIsManualFilenameEdit(false);
+                            }}
+                            className={`px-2 py-1 rounded text-[10px] font-medium border text-left transition-colors flex items-center gap-1 ${
+                              isSelected
+                                ? 'bg-blue-600 text-white border-blue-700 shadow-2xs font-semibold'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                            title={`Use "${toSentenceCase(preset)}" as filename subject`}
+                          >
+                            {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
+                            <span>{preset}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Filename Output Preview & Editable Field */}

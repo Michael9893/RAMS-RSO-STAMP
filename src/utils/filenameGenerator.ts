@@ -12,6 +12,13 @@ export const GOVERNMENT_DOC_TYPES = [
 
 export type GovernmentDocType = (typeof GOVERNMENT_DOC_TYPES)[number];
 
+export const PRESET_FILENAME_SUBJECTS = [
+  'Authority to Travel',
+  'Render Extra Services',
+  'Confirmation of Authority to Render Overtime',
+  'Confirmation of Official Station',
+] as const;
+
 /**
  * Extracts a 4-digit series year from the metadata series text, dates, or defaults to the current year.
  */
@@ -80,6 +87,7 @@ export function detectGovernmentDocType(
   // 3. Fallback to metadata classification
   if (metadata) {
     const titleUpper = `${metadata.title || ''} ${metadata.documentType || ''}`.toUpperCase();
+    const subjectUpper = (metadata.subject || '').toUpperCase();
     if (titleUpper.includes('REGIONAL SPECIAL ORDER') || titleUpper.includes('SPECIAL ORDER')) {
       return 'RSO';
     }
@@ -89,7 +97,13 @@ export function detectGovernmentDocType(
     ) {
       return 'MEMO ES/FWA';
     }
-    if (titleUpper.includes('TRAVEL') || titleUpper.includes('ATTEND') || titleUpper.includes('ATT/ATA')) {
+    if (
+      titleUpper.includes('TRAVEL') ||
+      titleUpper.includes('ATTEND') ||
+      titleUpper.includes('ATT/ATA') ||
+      (titleUpper.includes('MEMORANDUM') &&
+        (subjectUpper.includes('AUTHORITY TO TRAVEL') || subjectUpper.includes('TRAVEL')))
+    ) {
       return 'MEMO_ATT/ATA';
     }
     if (titleUpper.includes('ADMINISTRATIVE ORDER') || titleUpper.includes('CIRCULAR')) {
@@ -150,7 +164,7 @@ export function generateGovernmentFilename(
   const docType = options?.docTypeOverride || detectGovernmentDocType(stamp, metadata);
 
   // 2. Stamp Number (e.g. 2544 or 002852)
-  let rawNumber = stamp.number || '000000';
+  const rawNumber = stamp.number || '000000';
   // Strip any accidental leading "No. " or "#" typed into the number field
   const numMatch = rawNumber.match(/(?:No\.?\s*|#\s*)?([A-Za-z0-9_-]+)/i);
   const cleanNumber = sanitizeFilenamePart(numMatch ? numMatch[1] : rawNumber);
@@ -158,20 +172,23 @@ export function generateGovernmentFilename(
   // 3. Series Year: e.g. "s 2026"
   const year = extractSeriesYear(metadata?.series, metadata?.dates?.documentDate);
 
-  // 4. Subject formatted in Sentence case: e.g. "Authority to travel"
-  let subject = options?.customSubject || metadata?.subject || 'Official issuance';
-  subject = sanitizeFilenamePart(subject);
+  // 4. Subject formatted in Sentence case: e.g. "Official station" or "Authority to travel"
+  const rawSubject =
+    options?.customSubject !== undefined && options.customSubject.trim().length > 0
+      ? options.customSubject
+      : metadata?.subject || 'Official issuance';
+  let subject = sanitizeFilenamePart(rawSubject);
 
   // If subject is completely empty, use clean default
   if (!subject) {
-    subject = 'Official document';
+    subject = 'Official issuance';
   }
 
   subject = toSentenceCase(subject);
 
-  // Truncate overly long subjects to keep filename within standard filesystem 255-char limit
-  if (subject.length > 70) {
-    subject = subject.slice(0, 67).trim() + '...';
+  // Truncate overly long subjects while avoiding ugly trailing mid-space cuts
+  if (subject.length > 80) {
+    subject = subject.slice(0, 77).trim() + '...';
   }
 
   // Construct base name: "[DOC_TYPE] [STAMP_NUMBER] s [YEAR]-[SUBJECT]"

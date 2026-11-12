@@ -131,13 +131,15 @@ export default function App() {
       setCurrentPage(1);
       setStamp((prev) => ({ ...prev, pageNumber: 1 }));
 
-      // Extract verbatim text from PDF
+      // Extract verbatim text + spatial line geometry from PDF
       let extractedFullText = '';
       let extractedPages: { pageNumber: number; text: string }[] = [];
+      let extractedLines: Awaited<ReturnType<typeof extractFullTextFromPdf>>['linesInfo'] = [];
       try {
         const textResult = await extractFullTextFromPdf(doc);
         extractedFullText = textResult.fullText;
         extractedPages = textResult.pagesText;
+        extractedLines = textResult.linesInfo;
       } catch (err) {
         console.warn('Text extraction fallback:', err);
       }
@@ -148,16 +150,9 @@ export default function App() {
         name,
         doc.numPages,
         masterCopy.byteLength,
-        extractedPages
+        extractedPages,
+        extractedLines
       );
-
-      // Always base the subject strictly at "SUBJECT:"
-      if (
-        (!newDocMetadata.subject || newDocMetadata.subject === 'OFFICIAL ISSUANCE') &&
-        /travel/i.test(extractedFullText + ' ' + name)
-      ) {
-        newDocMetadata.subject = 'AUTHORITY TO TRAVEL';
-      }
 
       setMetadata(newDocMetadata);
 

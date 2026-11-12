@@ -1,4 +1,5 @@
 import { CategorizedDocumentInfo, DocumentPersonnel } from '../types/documentMetadata';
+import { ExtractedTextLine } from './pdfRenderer';
 
 /**
  * Intelligently analyzes extracted text from any uploaded PDF file
@@ -10,7 +11,8 @@ export function parseDocumentInfoFromExtractedText(
   filename: string,
   totalPages: number,
   fileSizeBytes: number,
-  pagesText: { pageNumber: number; text: string }[]
+  pagesText: { pageNumber: number; text: string }[],
+  linesInfo?: ExtractedTextLine[]
 ): CategorizedDocumentInfo {
   const cleanFilename = filename.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
   const lines = fullText
@@ -32,33 +34,44 @@ export function parseDocumentInfoFromExtractedText(
     }
   }
 
-  // 2. Extract Document Number
+  // 2. Extract Document Number (skip pure blank underscores like "NO. ________")
   let documentNumber = '000001';
-  const numMatch = fullText.match(
-    /(?:No\.|Number|Order\s+No\.|Ref(?:erence)?\s*(?:No\.?)?|Serial\s*(?:No\.?)?|#)\s*([A-Za-z0-9-_/]+)/i
+  const numMatches = fullText.matchAll(
+    /(?:No\.|Number|Order\s+No\.|Ref(?:erence)?\s*(?:No\.?)?|Serial\s*(?:No\.?)?|#)\s*[:\-]?\s*_*\s*([A-Za-z0-9][A-Za-z0-9-/]*)/gi
   );
-  if (numMatch && numMatch[1]) {
-    documentNumber = numMatch[1];
-  } else {
-    // Check for any 6-digit sequence
+  for (const m of numMatches) {
+    const candidate = m[1]?.replace(/_+/g, '').trim();
+    if (candidate && /\d/.test(candidate)) {
+      documentNumber = candidate;
+      break;
+    }
+  }
+  if (documentNumber === '000001') {
     const sixDigitMatch = fullText.match(/\b(\d{6})\b/);
     if (sixDigitMatch) {
       documentNumber = sixDigitMatch[1];
     }
   }
 
-  // 3. Extract Subject - Always base the subject strictly at "SUBJECT:" or "SUBJ:"
-  let subject = extractSubjectFromPdfText(fullText);
+  // 3. Extract Subject - Prioritize centered subject text on Page 1 & explicit SUBJECT: anchors
+  let subject = extractSubjectFromPdfText(fullText, linesInfo);
   if (!subject && lines.length > 2) {
-    // Fallback only if no explicit SUBJECT line exists
+    // Fallback only if no centered subject or explicit SUBJECT line exists
     const candidate = lines.find(
-      (l) => l !== title && !l.toLowerCase().includes('page') && l.length > 8 && !/^(no\.|series|annex)/i.test(l)
+      (l) =>
+        l !== title &&
+        !isBoilerplateHeaderOrDateLine(l) &&
+        l.length > 5 &&
+        l.length <= 90
     );
     if (candidate) {
-      subject = candidate.slice(0, 80).trim();
+      subject = cleanExtractedSubjectText(candidate).slice(0, 80).trim() || 'OFFICIAL ISSUANCE';
     } else {
       subject = 'OFFICIAL ISSUANCE';
     }
+  }
+  if (!subject) {
+    subject = 'OFFICIAL ISSUANCE';
   }
 
   // 4. Extract Series / Year
@@ -251,93 +264,279 @@ const GOVERNMENT_BODY_DELIMITERS = [
   'regional special order',
 ];
 
-/**
- * Extracts the exact subject from PDF text, always basing the subject
- * strictly at the "SUBJECT:" anchor line as requested by the user.
- *
- * Example:
- * Input: "SUBJECT: AUTHORITY TO TRAVEL In the exigency of service, Ms. Modesta L. Baguingan..."
- * Output: "AUTHORITY TO TRAVEL"
- */
-export function extractSubjectFromPdfText(fullText: string): string {
-  if (!fullText) return '';
+const BODY_PARAGRAPH_OPENERS = [
+  'in the exigency of service',
+  'in the exigency of the service',
+  'in the interest of service',
+  'in the interest of the service',
+  'the above-mentioned personnel',
+  'the following officials',
+  'the following personnel',
+  'in view of',
+  'in line with',
+  'pursuant to',
+  'please be informed',
+  'please find',
+  'this is to authorize',
+  'this office hereby',
+  'this office',
+  'herewith is',
+  'relative to',
+  'this has reference',
+  'in accordance with',
+  'hereby authorized',
+  'authorized to travel',
+  'whereas,',
+  'whereas',
+  'notice is hereby',
+  'be it resolved',
+];
 
-  // 1. Look for explicit "SUBJECT:" anchor (case-insensitive)
-  const subjectAnchorRegex = /(?:SUBJECT|SUBJ|SUBJECT\s+MATTER|RE|REGARDING)\s*[:\-–—]\s*/i;
-  const match = fullText.match(subjectAnchorRegex);
+function startsWithBodyDelimiter(text: string): boolean {
+  const lower = text.trim().toLowerCase();
+  if (!lower) return false;
+  return BODY_PARAGRAPH_OPENERS.some((d) => lower.startsWith(d));
+}
 
-  if (match && match.index !== undefined) {
-    const startIdx = match.index + match[0].length;
-    let candidate = fullText.slice(startIdx);
+function isBoilerplateHeaderOrDateLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  if (/^\[PAGE\s+\d+\]$/i.test(trimmed)) return true;
+  if (/^[_—–\-=.\s]+$/.test(trimmed)) return true;
+  if (
+    /^(?:republic of the philippines|department of|dswd|bagong pilipinas|regional field office|field office|office of the|regional special order|special order|memorandum|regional memorandum|administrative order|notice of violation|unnumbered memorandum|series\s+of\b|no\.?\s*[:\-_0-9]*$|annex\b|page\s+\d+)/i.test(
+      trimmed
+    )
+  ) {
+    return true;
+  }
+  // Standalone date line like "5 November 2026" or "November 5, 2026"
+  if (
+    /^\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}$/i.test(
+      trimmed
+    ) ||
+    /^(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}$/i.test(
+      trimmed
+    )
+  ) {
+    return true;
+  }
+  if (startsWithBodyDelimiter(trimmed)) return true;
+  return false;
+}
 
-    // If "SUBJECT:" was alone on a line, look at the immediate next non-empty line
-    const firstLineBreak = candidate.indexOf('\n');
-    const firstLine = firstLineBreak !== -1 ? candidate.slice(0, firstLineBreak).trim() : candidate.trim();
+function cleanExtractedSubjectText(raw: string): string {
+  if (!raw) return '';
+  let candidate = raw.trim();
 
-    if (firstLine.length === 0) {
-      const remainingLines = candidate.split('\n').map((l) => l.trim()).filter(Boolean);
-      if (remainingLines.length > 0) {
-        candidate = remainingLines[0];
-      }
-    } else {
-      candidate = firstLine;
-    }
+  // Strip embedded long underline bars (e.g. "Official Station ______")
+  candidate = candidate.replace(/_{2,}/g, ' ');
 
-    // Stop before any government body paragraph opener that might have merged onto the same line
-    const lowerCandidate = candidate.toLowerCase();
-    let cutIndex = -1;
+  // Stop before any government body paragraph opener that might have merged onto the same line
+  const lowerCandidate = candidate.toLowerCase();
+  let cutIndex = -1;
 
-    for (const delimiter of GOVERNMENT_BODY_DELIMITERS) {
-      const delimIdx = lowerCandidate.indexOf(delimiter);
-      if (delimIdx > 0 && (cutIndex === -1 || delimIdx < cutIndex)) {
-        cutIndex = delimIdx;
-      }
-    }
-
-    if (cutIndex > 0) {
-      candidate = candidate.slice(0, cutIndex);
-    }
-
-    // Clean up trailing and leading punctuation, quotes, underscores, asterisks
-    candidate = candidate
-      .replace(/^[\s:"'–—\-_]+/, '')
-      .replace(/[\s:"'–—\-_.;]+$/, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (candidate.length >= 3) {
-      return candidate;
+  for (const delimiter of GOVERNMENT_BODY_DELIMITERS) {
+    const delimIdx = lowerCandidate.indexOf(delimiter);
+    if (delimIdx >= 0 && (cutIndex === -1 || delimIdx < cutIndex)) {
+      cutIndex = delimIdx;
     }
   }
 
-  // 2. Scan line-by-line in case "SUBJECT" has no colon (e.g. "SUBJECT AUTHORITY TO TRAVEL")
-  const lines = fullText.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
-  for (const line of lines) {
-    const subjLineMatch = line.match(/^SUBJECT\s*[:\-–—]?\s*(.+)$/i);
-    if (subjLineMatch && subjLineMatch[1]) {
-      let subj = subjLineMatch[1].trim();
-      const lower = subj.toLowerCase();
+  if (cutIndex === 0) {
+    return '';
+  }
+  if (cutIndex > 0) {
+    candidate = candidate.slice(0, cutIndex);
+  }
 
-      for (const delimiter of GOVERNMENT_BODY_DELIMITERS) {
-        const dIdx = lower.indexOf(delimiter);
-        if (dIdx > 0) {
-          subj = subj.slice(0, dIdx);
+  // Clean up leading and trailing punctuation, quotes, underscores, asterisks
+  candidate = candidate
+    .replace(/^[\s:"'–—\-_]+/, '')
+    .replace(/[\s:"'–—\-_.;]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return candidate;
+}
+
+/**
+ * Collects consecutive centered continuation lines immediately following a subject anchor line
+ * (for multi-line centered subjects) before body text or unrelated sections begin.
+ */
+function collectCenteredContinuation(
+  pageLines: ExtractedTextLine[],
+  startIdx: number,
+  initialValue: string
+): string {
+  const parts: string[] = initialValue ? [initialValue] : [];
+  let prevY = pageLines[startIdx].y;
+
+  for (let i = startIdx + 1; i < pageLines.length; i++) {
+    const next = pageLines[i];
+    if (!next.isCentered) break;
+    if (next.y - prevY > 28) break;
+    if (isBoilerplateHeaderOrDateLine(next.text)) break;
+    if (/^(?:subject|subj|subject\s+matter|re|regarding)\s*[:\-–—]/i.test(next.text)) break;
+
+    const cleanedNext = cleanExtractedSubjectText(next.text);
+    if (!cleanedNext) break;
+    parts.push(cleanedNext);
+    prevY = next.y;
+    if (parts.join(' ').length >= 120) break;
+  }
+
+  return cleanExtractedSubjectText(parts.join(' '));
+}
+
+/**
+ * Extracts the exact subject from PDF text, always prioritizing the centered
+ * subject text on Page 1 (e.g. "Subject: Official Station" or "SUBJECT: AUTHORITY TO TRAVEL").
+ */
+export function extractSubjectFromPdfText(
+  fullText: string,
+  linesInfo?: ExtractedTextLine[]
+): string {
+  if (!fullText && (!linesInfo || linesInfo.length === 0)) return '';
+
+  const page1Lines = (linesInfo || []).filter((l) => l.pageNumber === 1);
+
+  // 1. PRIORITY: Centered line on Page 1 containing explicit "Subject:" / "SUBJ:"
+  if (page1Lines.length > 0) {
+    for (let i = 0; i < page1Lines.length; i++) {
+      const line = page1Lines[i];
+      if (!line.isCentered) continue;
+
+      const centeredAnchor = line.text.match(
+        /^\s*(?:SUBJECT|SUBJ|SUBJECT\s+MATTER)\s*[:\-–—]\s*(.*)$/i
+      );
+      if (centeredAnchor) {
+        const inlinePart = cleanExtractedSubjectText(centeredAnchor[1] || '');
+        const combined = collectCenteredContinuation(page1Lines, i, inlinePart);
+        if (combined.length >= 2) {
+          return combined;
+        }
+      }
+    }
+
+    // 2. Any line on Page 1 with explicit "Subject:" / "SUBJ:" (and check centered continuation below it)
+    for (let i = 0; i < page1Lines.length; i++) {
+      const line = page1Lines[i];
+      const anchorMatch = line.text.match(
+        /\b(?:SUBJECT|SUBJ|SUBJECT\s+MATTER)\s*[:\-–—]\s*(.*)$/i
+      );
+      if (anchorMatch) {
+        const inlinePart = cleanExtractedSubjectText(anchorMatch[1] || '');
+        if (inlinePart.length >= 2) {
+          const combined = collectCenteredContinuation(page1Lines, i, inlinePart);
+          if (combined.length >= 2) return combined;
+          return inlinePart;
+        }
+        // "Subject:" was alone on the line — grab the immediate next non-boilerplate centered/next line
+        for (let j = i + 1; j < Math.min(i + 4, page1Lines.length); j++) {
+          if (isBoilerplateHeaderOrDateLine(page1Lines[j].text)) continue;
+          const nextClean = cleanExtractedSubjectText(page1Lines[j].text);
+          if (nextClean.length >= 2) {
+            return collectCenteredContinuation(page1Lines, j, nextClean) || nextClean;
+          }
           break;
         }
       }
+    }
 
-      subj = subj
-        .replace(/^[\s:"'–—\-_]+/, '')
-        .replace(/[\s:"'–—\-_.;]+$/, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+    // 3. Unlabeled centered subject block on Page 1 (between header/series lines and body paragraph)
+    const bodyStartIdx = page1Lines.findIndex(
+      (l) =>
+        startsWithBodyDelimiter(l.text) ||
+        (!l.isCentered && l.text.length > 75 && /[.!?]$/.test(l.text))
+    );
+    const searchLimit = bodyStartIdx !== -1 ? bodyStartIdx : page1Lines.length;
 
-      if (subj.length >= 3) {
-        return subj;
+    let headerEndIdx = -1;
+    for (let i = 0; i < searchLimit; i++) {
+      if (
+        /^(?:regional\s+special\s+order|special\s+order|memorandum|regional\s+memorandum|administrative\s+order|series\s+of\b|no\.(?:\s|$|[:\-_0-9]))/i.test(
+          page1Lines[i].text
+        )
+      ) {
+        headerEndIdx = i;
+      }
+    }
+
+    const centeredCandidates: { idx: number; line: ExtractedTextLine }[] = [];
+    for (let i = Math.max(0, headerEndIdx + 1); i < searchLimit; i++) {
+      const line = page1Lines[i];
+      if (!line.isCentered) continue;
+      if (isBoilerplateHeaderOrDateLine(line.text)) continue;
+      // Ignore very top agency banner area if above header order title
+      if (headerEndIdx === -1 && line.y < line.pageHeight * 0.14) continue;
+      centeredCandidates.push({ idx: i, line });
+    }
+
+    if (centeredCandidates.length > 0) {
+      const first = centeredCandidates[0];
+      const cleanedFirst = cleanExtractedSubjectText(
+        first.line.text.replace(/^(?:SUBJECT|SUBJ|RE)\s*[:\-–—]?\s*/i, '')
+      );
+      const combined = collectCenteredContinuation(page1Lines, first.idx, cleanedFirst);
+      if (combined.length >= 2) {
+        return combined;
+      }
+    }
+  }
+
+  // 4. Plain-text fallback: look for explicit word-bounded "SUBJECT:" / "SUBJ:" anchor
+  const explicitSubjectRegex = /\b(?:SUBJECT|SUBJ|SUBJECT\s+MATTER)\s*[:\-–—]\s*/i;
+  const match = fullText.match(explicitSubjectRegex);
+
+  if (match && match.index !== undefined) {
+    const startIdx = match.index + match[0].length;
+    const afterMatch = fullText.slice(startIdx);
+    const firstLineBreak = afterMatch.indexOf('\n');
+    let candidate =
+      firstLineBreak !== -1 ? afterMatch.slice(0, firstLineBreak).trim() : afterMatch.trim();
+
+    if (candidate.length === 0) {
+      const remainingLines = afterMatch
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (remainingLines.length > 0) {
+        candidate = remainingLines[0];
+      }
+    }
+
+    const cleaned = cleanExtractedSubjectText(candidate);
+    if (cleaned.length >= 2) {
+      return cleaned;
+    }
+  }
+
+  // 5. Line-by-line scan for unpunctuated "SUBJECT ..." or line-start "RE: ..." / "REGARDING: ..."
+  const lines = fullText
+    .split(/[\r\n]+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const subjLineMatch = line.match(
+      /^(?:SUBJECT|SUBJ|SUBJECT\s+MATTER|RE|REGARDING)\s*[:\-–—]\s*(.*)$/i
+    ) || line.match(/^SUBJECT\s+(.+)$/i);
+
+    if (subjLineMatch) {
+      let rawPart = (subjLineMatch[1] || '').trim();
+      if (!rawPart && i + 1 < lines.length) {
+        rawPart = lines[i + 1];
+      }
+      const cleaned = cleanExtractedSubjectText(rawPart);
+      if (cleaned.length >= 2) {
+        return cleaned;
       }
     }
   }
 
   return '';
 }
+
 

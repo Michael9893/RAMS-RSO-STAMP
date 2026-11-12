@@ -17,6 +17,8 @@ import {
   Sparkles,
   HelpCircle,
   RotateCcw,
+  History,
+  Plus,
 } from 'lucide-react';
 import {
   StampConfig,
@@ -26,17 +28,21 @@ import {
   GOVERNMENT_STANDARD_STAMP,
 } from '../utils/pdfStamper';
 import { CategorizedDocumentInfo } from '../types/documentMetadata';
-import { generateGovernmentFilename } from '../utils/filenameGenerator';
+import { generateGovernmentFilename, GOVERNMENT_DOC_TYPES, GovernmentDocType } from '../utils/filenameGenerator';
+import { RecentTrackerState, formatRelativeTime } from '../utils/recentTracker';
 
 interface StampControlsProps {
   stamp: StampConfig;
   metadata?: CategorizedDocumentInfo;
+  trackerState?: RecentTrackerState;
   currentPage: number;
   totalPages: number;
   isProcessing: boolean;
   onStampChange: (updated: Partial<StampConfig>) => void;
   onStampNudge: (deltaX: number, deltaY: number) => void;
   onDownload: () => void;
+  onOpenTrackerModal?: () => void;
+  onUseTrackedNumber?: (docType: GovernmentDocType, stampNumber: string) => void;
 }
 
 const INK_COLORS = [
@@ -59,12 +65,15 @@ const QUICK_SYMBOLS = ['#', '-', '/', '_', '.', 'No.', '2026', '()'];
 export const StampControls: React.FC<StampControlsProps> = ({
   stamp,
   metadata,
+  trackerState,
   currentPage,
   totalPages,
   isProcessing,
   onStampChange,
   onStampNudge,
   onDownload,
+  onOpenTrackerModal,
+  onUseTrackedNumber,
 }) => {
   const [typedInput, setTypedInput] = useState(stamp.number);
   const liveFilenamePreview = generateGovernmentFilename(stamp, metadata);
@@ -133,7 +142,7 @@ export const StampControls: React.FC<StampControlsProps> = ({
   };
 
   const isGovStandardActive =
-    stamp.fontFamily === 'Courier' &&
+    stamp.fontFamily === 'TimesRoman' &&
     stamp.fontSize === 15 &&
     stamp.color.toLowerCase() === '#0038a8' &&
     stamp.rotation === 0 &&
@@ -182,6 +191,7 @@ export const StampControls: React.FC<StampControlsProps> = ({
           <div className="grid grid-cols-2 gap-1.5">
             {GOVERNMENT_DOCUMENT_TYPES.map((docType) => {
               const isSelected = stamp.documentType === docType.id || stamp.prefix.startsWith(docType.id);
+              const lastRecord = trackerState?.lastByType[docType.id as GovernmentDocType];
               return (
                 <button
                   key={docType.id}
@@ -199,7 +209,7 @@ export const StampControls: React.FC<StampControlsProps> = ({
                     {isSelected && <Check className="w-3 h-3 text-white" />}
                   </div>
                   <div className={`text-[9px] truncate mt-0.5 ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
-                    {docType.fullName}
+                    {lastRecord ? `Last: ${lastRecord.stampNumber}` : docType.fullName}
                   </div>
                 </button>
               );
@@ -245,6 +255,57 @@ export const StampControls: React.FC<StampControlsProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Compact Recent Tracker Strip */}
+          {trackerState && (
+            <div className="pt-1.5 border-t border-slate-200/80 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
+                  <History className="w-3 h-3 text-blue-600" />
+                  <span>Last Stamped & Downloaded</span>
+                </span>
+                {onOpenTrackerModal && (
+                  <button
+                    type="button"
+                    onClick={onOpenTrackerModal}
+                    className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 underline"
+                  >
+                    View Tracker ({trackerState.history.length})
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1">
+                {GOVERNMENT_DOC_TYPES.map((type) => {
+                  const rec = trackerState.lastByType[type];
+                  const nextNum = rec ? incrementDocumentNumber(rec.stampNumber, 1) : null;
+                  return (
+                    <div
+                      key={type}
+                      className="flex items-center justify-between gap-1 bg-white border border-slate-200 rounded px-1.5 py-1 text-[10px]"
+                      title={rec ? `${rec.filename} (${formatRelativeTime(rec.downloadedAt)})` : `No ${type} downloaded yet`}
+                    >
+                      <div className="min-w-0">
+                        <span className="font-mono font-bold text-slate-700 block truncate text-[9px]">{type}</span>
+                        <span className={`font-mono font-bold ${rec ? 'text-blue-700' : 'text-slate-300'}`}>
+                          {rec ? rec.stampNumber : '------'}
+                        </span>
+                      </div>
+                      {rec && nextNum && onUseTrackedNumber && (
+                        <button
+                          type="button"
+                          onClick={() => onUseTrackedNumber(type, nextNum)}
+                          className="px-1.5 py-0.5 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white border border-blue-200 rounded font-mono text-[9px] font-bold transition-colors shrink-0 flex items-center gap-0.5"
+                          title={`Set number to next ${type} (${nextNum})`}
+                        >
+                          <Plus className="w-2.5 h-2.5" />1
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* C. PRIMARY DOCUMENT NUMBER INPUT (TEXT, NUMBERS, & SPECIAL CHARACTERS) */}
@@ -432,6 +493,16 @@ export const StampControls: React.FC<StampControlsProps> = ({
 
             <div className="grid grid-cols-3 gap-1.5 mb-2">
               <button
+                onClick={() => onStampChange({ fontFamily: 'TimesRoman' })}
+                className={`py-1.5 px-2 text-[11px] font-serif font-bold rounded-md border text-center transition-colors ${
+                  stamp.fontFamily === 'TimesRoman'
+                    ? 'bg-blue-50 border-blue-500 text-blue-700'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                Formal Serif
+              </button>
+              <button
                 onClick={() => onStampChange({ fontFamily: 'Courier' })}
                 className={`py-1.5 px-2 text-[11px] font-mono font-semibold rounded-md border text-center transition-colors ${
                   stamp.fontFamily === 'Courier'
@@ -451,16 +522,6 @@ export const StampControls: React.FC<StampControlsProps> = ({
               >
                 Clean Sans
               </button>
-              <button
-                onClick={() => onStampChange({ fontFamily: 'TimesRoman' })}
-                className={`py-1.5 px-2 text-[11px] font-serif font-bold rounded-md border text-center transition-colors ${
-                  stamp.fontFamily === 'TimesRoman'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                Formal Serif
-              </button>
             </div>
 
             {/* Simple button: Standard Government Format */}
@@ -472,7 +533,7 @@ export const StampControls: React.FC<StampControlsProps> = ({
                   ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
                   : 'bg-white hover:bg-blue-50 text-blue-700 hover:text-blue-800 border-blue-300'
               }`}
-              title="Apply Standard Government Format: 15pt Courier Bold, Official Blue (#0038a8), 0.0° Horizontal"
+              title="Apply Standard Government Format: 15pt Formal Serif Bold, Official Blue (#0038a8), 0.0° Horizontal"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Standard Government Format (15pt Blue)</span>

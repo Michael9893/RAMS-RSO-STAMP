@@ -35,7 +35,7 @@ export interface StampConfig {
 
 // Government Standard Preset values for professional numbering
 export const GOVERNMENT_STANDARD_STAMP: Partial<StampConfig> = {
-  fontFamily: 'Courier',
+  fontFamily: 'TimesRoman',
   fontSize: 15,
   color: '#0038a8', // Official Philippine Government Blue Ink
   opacity: 0.96,

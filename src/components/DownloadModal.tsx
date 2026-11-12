@@ -23,6 +23,7 @@ import {
   GovernmentDocType,
   detectGovernmentDocType,
   extractSeriesYear,
+  toSentenceCase,
 } from '../utils/filenameGenerator';
 
 interface DownloadModalProps {
@@ -35,7 +36,12 @@ interface DownloadModalProps {
   metadata?: CategorizedDocumentInfo;
   isProcessing: boolean;
   onClose: () => void;
-  onConfirmDownload: (selectedPages: number[], customFilename: string) => void;
+  onConfirmDownload: (
+    selectedPages: number[],
+    customFilename: string,
+    docType: GovernmentDocType,
+    subjectUsed: string
+  ) => void;
 }
 
 export const DownloadModal: React.FC<DownloadModalProps> = ({
@@ -57,7 +63,9 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   // Government Filename Generation State
   const initialDocType = detectGovernmentDocType(stamp, metadata);
   const [activeDocType, setActiveDocType] = useState<GovernmentDocType>(initialDocType);
-  const [customSubject, setCustomSubject] = useState<string>(metadata?.subject || 'AUTHORITY TO TRAVEL ON OFFICIAL TIME');
+  const [customSubject, setCustomSubject] = useState<string>(
+    toSentenceCase(metadata?.subject || 'Authority to travel on official time')
+  );
   const [outputFilename, setOutputFilename] = useState<string>('');
   const [isManualFilenameEdit, setIsManualFilenameEdit] = useState<boolean>(false);
 
@@ -77,7 +85,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
       const detected = detectGovernmentDocType(stamp, metadata);
       setActiveDocType(detected);
       if (metadata?.subject) {
-        setCustomSubject(metadata.subject);
+        setCustomSubject(toSentenceCase(metadata.subject));
       }
 
       if (totalPages <= 1) {
@@ -431,7 +439,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                       setCustomSubject(e.target.value);
                       setIsManualFilenameEdit(false);
                     }}
-                    placeholder="e.g. Confirmation of Travel"
+                    placeholder="e.g. Confirmation of travel"
                     className="w-full px-2 py-1 text-xs border border-slate-300 rounded bg-white focus:outline-none focus:border-blue-500 font-medium"
                   />
                 </div>
@@ -450,7 +458,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                       setIsManualFilenameEdit(true);
                     }}
                     className="w-full px-2.5 py-1.5 text-xs font-mono font-bold border-2 border-blue-400 rounded-lg focus:outline-none focus:border-blue-600 bg-white text-slate-900 shadow-2xs"
-                    placeholder="RSO 2544 s 2026-Confirmation of Travel.pdf"
+                    placeholder="RSO 2544 s 2026-Confirmation of travel.pdf"
                   />
                   <p className="text-[9px] text-slate-500 mt-1">
                     Standard: <code className="font-mono text-slate-700">[TYPE] [NUMBER] s [YEAR]-[SUBJECT].pdf</code>
@@ -544,7 +552,9 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
               <button
                 type="button"
                 disabled={isProcessing || selectedPages.length === 0}
-                onClick={() => onConfirmDownload(selectedPages, outputFilename)}
+                onClick={() =>
+                  onConfirmDownload(selectedPages, outputFilename, activeDocType, customSubject)
+                }
                 className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-99 text-white font-bold text-xs md:text-sm rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {isProcessing ? (

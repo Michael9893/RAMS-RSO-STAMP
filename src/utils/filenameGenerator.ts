@@ -118,11 +118,23 @@ export function sanitizeFilenamePart(text: string): string {
 }
 
 /**
+ * Converts a string to clean Sentence case (first letter capitalized, rest lowercase).
+ * Example: "AUTHORITY TO TRAVEL" -> "Authority to travel"
+ */
+export function toSentenceCase(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  return trimmed
+    .toLowerCase()
+    .replace(/^([^a-zA-Z]*)([a-zA-Z])/, (_, prefix, firstChar) => `${prefix}${firstChar.toUpperCase()}`);
+}
+
+/**
  * Generates the standardized official government filename format:
- * [DOC_TYPE] [STAMP_NUMBER] s [YEAR]-[SUBJECT].pdf
+ * [DOC_TYPE] [STAMP_NUMBER] s [YEAR]-[Subject in sentence case].pdf
  *
  * Example:
- * "RSO 2544 s 2026-Confirmation of Travel.pdf"
+ * "RSO 2544 s 2026-Confirmation of travel.pdf"
  */
 export function generateGovernmentFilename(
   stamp: StampConfig,
@@ -146,14 +158,16 @@ export function generateGovernmentFilename(
   // 3. Series Year: e.g. "s 2026"
   const year = extractSeriesYear(metadata?.series, metadata?.dates?.documentDate);
 
-  // 4. Subject: e.g. "Confirmation of Travel" or "AUTHORITY TO TRAVEL ON OFFICIAL TIME"
-  let subject = options?.customSubject || metadata?.subject || 'Official Issuance';
+  // 4. Subject formatted in Sentence case: e.g. "Authority to travel"
+  let subject = options?.customSubject || metadata?.subject || 'Official issuance';
   subject = sanitizeFilenamePart(subject);
 
-  // If subject is completely empty or generic, use clean default
+  // If subject is completely empty, use clean default
   if (!subject) {
-    subject = 'Official Document';
+    subject = 'Official document';
   }
+
+  subject = toSentenceCase(subject);
 
   // Truncate overly long subjects to keep filename within standard filesystem 255-char limit
   if (subject.length > 70) {

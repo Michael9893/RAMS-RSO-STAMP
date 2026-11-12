@@ -1,16 +1,21 @@
 import React, { useRef, useState } from 'react';
-import { UploadCloud, FileText, CheckCircle2, Shield, Stamp, Hash } from 'lucide-react';
+import { UploadCloud, Stamp, History, Clock, Plus } from 'lucide-react';
+import { GOVERNMENT_DOC_TYPES, GovernmentDocType } from '../utils/filenameGenerator';
+import { incrementDocumentNumber } from '../utils/pdfStamper';
+import { RecentTrackerState, formatRelativeTime } from '../utils/recentTracker';
 
 interface PdfDropzoneProps {
   onFileSelected: (file: File) => void;
-  onLoadSample: () => void;
-  isLoadingSample: boolean;
+  trackerState?: RecentTrackerState;
+  onOpenTrackerModal?: () => void;
+  onUseTrackedNumber?: (docType: GovernmentDocType, stampNumber: string) => void;
 }
 
 export const PdfDropzone: React.FC<PdfDropzoneProps> = ({
   onFileSelected,
-  onLoadSample,
-  isLoadingSample,
+  trackerState,
+  onOpenTrackerModal,
+  onUseTrackedNumber,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -89,60 +94,109 @@ export const PdfDropzone: React.FC<PdfDropzoneProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all active:scale-98"
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all active:scale-98"
           >
             Browse PDF Document
-          </button>
-
-          <span className="text-xs text-slate-400 font-medium">or</span>
-
-          <button
-            type="button"
-            onClick={onLoadSample}
-            disabled={isLoadingSample}
-            className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-lg transition-all flex items-center gap-2"
-          >
-            {isLoadingSample ? (
-              <div className="w-4 h-4 border-2 border-slate-400 border-t-slate-700 rounded-full animate-spin" />
-            ) : (
-              <FileText className="w-4 h-4 text-blue-600" />
-            )}
-            <span>Try Sample Document (DSWD Special Order)</span>
           </button>
         </div>
       </div>
 
-      {/* Feature Pillars */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
-        <div className="p-4 bg-white border border-slate-200 rounded-xl">
-          <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center mb-3">
-            <Hash className="w-4 h-4" />
+      {/* Recent Stamped & Downloaded Tracker (Front Page Summary) */}
+      {trackerState && (
+        <div className="mt-6 bg-white border border-slate-200 rounded-2xl p-4 md:p-5 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                <History className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">
+                  Recent Stamped & Downloaded Tracker
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  Last stamped number and downloaded file for each document category
+                </p>
+              </div>
+            </div>
+            {onOpenTrackerModal && (
+              <button
+                type="button"
+                onClick={onOpenTrackerModal}
+                className="px-3 py-1.5 text-xs font-semibold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors"
+              >
+                Full History Log ({trackerState.history.length})
+              </button>
+            )}
           </div>
-          <h4 className="text-sm font-semibold text-slate-900">Type Any 6-Digit Number</h4>
-          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-            Type directly to change the number (e.g. <span className="font-mono text-blue-700 font-semibold">002852</span>). Auto-zero padding, quick +/- buttons, and optional series prefixes.
-          </p>
-        </div>
 
-        <div className="p-4 bg-white border border-slate-200 rounded-xl">
-          <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center mb-3">
-            <Stamp className="w-4 h-4" />
-          </div>
-          <h4 className="text-sm font-semibold text-slate-900">Pixel-Perfect Drag & Align</h4>
-          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-            Drag the stamp directly onto the signature underline or blank slot. Arrow-key nudge controls ensure exact alignment.
-          </p>
-        </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            {GOVERNMENT_DOC_TYPES.map((type) => {
+              const record = trackerState.lastByType[type];
+              const nextNum = record ? incrementDocumentNumber(record.stampNumber, 1) : null;
+              return (
+                <div
+                  key={type}
+                  className={`rounded-xl border p-2.5 flex flex-col justify-between transition-all ${
+                    record
+                      ? 'bg-slate-50/70 border-slate-200 hover:border-blue-300'
+                      : 'bg-slate-50/40 border-slate-200/60'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <span className="font-mono text-[10px] font-bold text-slate-800 bg-white px-1.5 py-0.5 rounded border border-slate-200 truncate">
+                        {type}
+                      </span>
+                      {record && (
+                        <span className="text-[9px] text-emerald-700 font-medium flex items-center gap-0.5 shrink-0">
+                          <Clock className="w-2.5 h-2.5" />
+                          {formatRelativeTime(record.downloadedAt)}
+                        </span>
+                      )}
+                    </div>
 
-        <div className="p-4 bg-white border border-slate-200 rounded-xl">
-          <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center mb-3">
-            <Shield className="w-4 h-4" />
+                    {record ? (
+                      <>
+                        <div className="font-mono text-sm font-extrabold text-blue-700 tracking-wide my-1">
+                          {record.stampNumber}
+                        </div>
+                        <div
+                          className="text-[10px] text-slate-600 truncate"
+                          title={record.filename}
+                        >
+                          {record.filename}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="py-2 text-[10px] text-slate-400">
+                        Not yet stamped
+                      </div>
+                    )}
+                  </div>
+
+                  {record && nextNum && onUseTrackedNumber && (
+                    <button
+                      type="button"
+                      onClick={() => onUseTrackedNumber(type, nextNum)}
+                      className="mt-2 w-full py-1 px-1.5 bg-white hover:bg-blue-600 text-blue-700 hover:text-white border border-blue-200 hover:border-blue-600 rounded text-[10px] font-bold font-mono transition-colors flex items-center justify-center gap-0.5"
+                      title={`Queue next ${type} number (${nextNum})`}
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                      <span>Next {nextNum}</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <h4 className="text-sm font-semibold text-slate-900">Authentic Office Ink</h4>
-          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-            Choose mechanical rotary stamp font, authentic government blue ink, red verification stamp, or clean black.
-          </p>
         </div>
+      )}
+
+      {/* Footer Attribution */}
+      <div className="mt-8 text-center">
+        <p className="text-xs font-medium text-slate-500 tracking-wide">
+          Powered by <span className="font-bold text-slate-700">MJB</span> since 2026
+        </p>
       </div>
     </div>
   );

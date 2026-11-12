@@ -1,16 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import {
-  FileText,
-  Upload,
-  Download,
   CheckCircle2,
   AlertCircle,
-  HelpCircle,
   X,
-  FileCheck,
   ListFilter,
-  Sparkles,
 } from 'lucide-react';
 import { TopNavbar } from './components/TopNavbar';
 import { PdfDropzone } from './components/PdfDropzone';
@@ -18,23 +12,28 @@ import { PdfViewer } from './components/PdfViewer';
 import { StampControls } from './components/StampControls';
 import { DownloadModal } from './components/DownloadModal';
 import { DocumentInfoModal } from './components/DocumentInfoModal';
+import { RecentTrackerModal } from './components/RecentTrackerModal';
 import {
   StampConfig,
-  stampPdfDocument,
-  stampAndExtractSinglePagePdf,
   stampAndExtractSelectedPagesPdf,
-  createSampleDocumentPdf,
-  createAuthorityToTravelSamplePdf,
   convertImageToPdfBytes,
   downloadPdfBlob,
+  GOVERNMENT_DOCUMENT_TYPES,
 } from './utils/pdfStamper';
 import { loadPdfDocument, extractFullTextFromPdf, findPdfHeaderOffset } from './utils/pdfRenderer';
 import {
   CategorizedDocumentInfo,
-  DEFAULT_DSWD_METADATA,
-  DEFAULT_MODESTA_METADATA,
+  EMPTY_DOCUMENT_METADATA,
 } from './types/documentMetadata';
 import { parseDocumentInfoFromExtractedText } from './utils/textParser';
+import { GovernmentDocType, GOVERNMENT_DOC_TYPES } from './utils/filenameGenerator';
+import {
+  RecentTrackerState,
+  loadRecentTracker,
+  recordStampedDownload,
+  clearRecentTracker,
+  removeTrackedHistoryItem,
+} from './utils/recentTracker';
 
 export default function App() {
   const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null);
@@ -43,14 +42,15 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [isLoadingSample, setIsLoadingSample] = useState<boolean>(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState<boolean>(false);
   const [isMetadataModalOpen, setIsMetadataModalOpen] = useState<boolean>(false);
+  const [isTrackerModalOpen, setIsTrackerModalOpen] = useState<boolean>(false);
+  const [trackerState, setTrackerState] = useState<RecentTrackerState>(() => loadRecentTracker());
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Categorized Document Information (Name, Subject, Dates, Personnel, Approval)
-  const [metadata, setMetadata] = useState<CategorizedDocumentInfo>(DEFAULT_DSWD_METADATA);
+  const [metadata, setMetadata] = useState<CategorizedDocumentInfo>(EMPTY_DOCUMENT_METADATA);
 
   // Default stamp config initialized to match official government standards
   const [stamp, setStamp] = useState<StampConfig>({
@@ -64,7 +64,7 @@ export default function App() {
     applyToAllPages: false,
     sequential: false,
     fontSize: 15, // Standard professional 15pt government numbering
-    fontFamily: 'Courier',
+    fontFamily: 'TimesRoman', // Default Stamp Typography: Formal Serif
     color: '#0038a8', // Official Philippine Government blue stamp ink
     opacity: 0.96,
     rotation: 0, // Clean 0° horizontal government alignment
@@ -142,52 +142,34 @@ export default function App() {
         console.warn('Text extraction fallback:', err);
       }
 
-      // Check if loading one of the built-in sample documents
-      let activeMetadata: CategorizedDocumentInfo;
+      // Automatically extract all text and parse into Categorized Document Info for the uploaded PDF
+      const newDocMetadata = parseDocumentInfoFromExtractedText(
+        extractedFullText,
+        name,
+        doc.numPages,
+        masterCopy.byteLength,
+        extractedPages
+      );
+
+      // Always base the subject strictly at "SUBJECT:"
       if (
-        name === 'Authority_to_Travel_Order.pdf' ||
-        name.includes('image_5839a483') ||
-        name.includes('Baguingan')
+        (!newDocMetadata.subject || newDocMetadata.subject === 'OFFICIAL ISSUANCE') &&
+        /travel/i.test(extractedFullText + ' ' + name)
       ) {
-        activeMetadata = DEFAULT_MODESTA_METADATA;
-        setMetadata(DEFAULT_MODESTA_METADATA);
-      } else if (
-        name === 'Regional_Special_Order_DSWD.pdf' ||
-        name === 'Sample_Official_Order.pdf'
-      ) {
-        activeMetadata = DEFAULT_DSWD_METADATA;
-        setMetadata(DEFAULT_DSWD_METADATA);
-      } else {
-        // Automatically extract all text and parse into Categorized Document Info for the new PDF
-        const newDocMetadata = parseDocumentInfoFromExtractedText(
-          extractedFullText,
-          name,
-          doc.numPages,
-          masterCopy.byteLength,
-          extractedPages
-        );
-
-        // Always base the subject strictly at "SUBJECT:"
-        if (
-          (!newDocMetadata.subject || newDocMetadata.subject === 'OFFICIAL ISSUANCE') &&
-          /travel/i.test(extractedFullText + ' ' + name)
-        ) {
-          newDocMetadata.subject = 'AUTHORITY TO TRAVEL';
-        }
-
-        activeMetadata = newDocMetadata;
-        setMetadata(newDocMetadata);
-
-        // If a document number was detected in the new PDF, set stamp number to match
-        if (newDocMetadata.documentNumber && newDocMetadata.documentNumber !== '000001') {
-          setStamp((prev) => ({
-            ...prev,
-            number: newDocMetadata.documentNumber,
-          }));
-        }
+        newDocMetadata.subject = 'AUTHORITY TO TRAVEL';
       }
 
-      showToast(`Loaded ${name} (${doc.numPages} page${doc.numPages > 1 ? 's' : ''}) - Subject: "${activeMetadata.subject}"`);
+      setMetadata(newDocMetadata);
+
+      // If a document number was detected in the new PDF, set stamp number to match
+      if (newDocMetadata.documentNumber && newDocMetadata.documentNumber !== '000001') {
+        setStamp((prev) => ({
+          ...prev,
+          number: newDocMetadata.documentNumber,
+        }));
+      }
+
+      showToast(`Loaded ${name} (${doc.numPages} page${doc.numPages > 1 ? 's' : ''}) - Subject: "${newDocMetadata.subject}"`);
     } catch (err: any) {
       console.error('Failed to load PDF bytes:', err);
       showToast('Could not parse PDF. Please verify it is a valid PDF document or image file.', 'error');
@@ -196,33 +178,6 @@ export default function App() {
       setIsUploadModalOpen(false);
     }
   };
-
-  // Automatically load the sample DSWD document on initial launch
-  useEffect(() => {
-    let isMounted = true;
-
-    async function initSample() {
-      setIsLoadingSample(true);
-      try {
-        const sample = await createSampleDocumentPdf();
-        if (isMounted) {
-          await loadPdfBytes(sample.data, sample.filename);
-        }
-      } catch (err) {
-        console.error('Failed to auto-load sample:', err);
-      } finally {
-        if (isMounted) {
-          setIsLoadingSample(false);
-        }
-      }
-    }
-
-    initSample();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   const handleFileSelected = async (file: File) => {
     setIsProcessing(true);
@@ -254,51 +209,6 @@ export default function App() {
     }
   };
 
-  const handleLoadSample = async () => {
-    setIsLoadingSample(true);
-    try {
-      const sample = await createSampleDocumentPdf();
-      await loadPdfBytes(sample.data, sample.filename);
-      setMetadata(DEFAULT_DSWD_METADATA);
-      setStamp((prev) => ({
-        ...prev,
-        xPercent: 18.0,
-        yPercent: 16.8,
-        number: '002852',
-        color: '#0038a8',
-      }));
-    } catch (err) {
-      console.error('Failed to load sample document:', err);
-      showToast('Failed to load sample document', 'error');
-    } finally {
-      setIsLoadingSample(false);
-    }
-  };
-
-  const handleLoadAuthorityToTravelSample = async () => {
-    setIsLoadingSample(true);
-    try {
-      const sample = await createAuthorityToTravelSamplePdf();
-      await loadPdfBytes(sample.data, sample.filename);
-      setMetadata(DEFAULT_MODESTA_METADATA);
-      setStamp((prev) => ({
-        ...prev,
-        xPercent: 16.5,
-        yPercent: 13.8,
-        number: '002852',
-        color: '#0038a8',
-        documentType: 'MEMO_ATT/ATA',
-        prefix: 'MEMO_ATT/ATA No. ',
-      }));
-      showToast('Loaded Authority to Travel Order (Subject: AUTHORITY TO TRAVEL)');
-    } catch (err) {
-      console.error('Failed to load travel sample:', err);
-      showToast('Failed to load sample document', 'error');
-    } finally {
-      setIsLoadingSample(false);
-    }
-  };
-
   const handleResetStamp = () => {
     setStamp((prev) => ({
       ...prev,
@@ -306,11 +216,12 @@ export default function App() {
       yPercent: 14.2,
       number: '002852',
       rotation: 0,
-      fontSize: 16,
+      fontSize: 15,
+      fontFamily: 'TimesRoman',
       boxStyle: 'none',
       color: '#0038a8',
     }));
-    showToast('Stamp reset to default settings');
+    showToast('Stamp reset to default settings (Formal Serif)');
   };
 
   const handleStampChange = (updated: Partial<StampConfig>) => {
@@ -345,10 +256,12 @@ export default function App() {
     setIsDownloadModalOpen(true);
   };
 
-  // Executes download based on user's selected pages
+  // Executes download based on user's selected pages and records in Recent Tracker
   const handleConfirmDownload = async (
     selectedPages: number[],
-    customFilename: string
+    customFilename: string,
+    docType: GovernmentDocType,
+    subjectUsed: string
   ) => {
     if (!pdfBytes) return;
 
@@ -362,6 +275,20 @@ export default function App() {
       );
 
       downloadPdfBlob(finalBytes, customFilename);
+
+      // Track the last downloaded and stamped PDF for RSO, MEMO ES/FWA, MEMO_ATT/ATA, RAO_RMC, U_MEMO, NOV
+      setTrackerState((prev) =>
+        recordStampedDownload(prev, {
+          docType,
+          stampNumber: stamp.number,
+          fullStampText: `${stamp.prefix}${stamp.number}${stamp.suffix}`,
+          filename: customFilename,
+          subject: subjectUsed || metadata.subject || 'Official document',
+          selectedPages,
+          totalPages,
+        })
+      );
+
       setIsDownloadModalOpen(false);
       showToast(
         selectedPages.length === totalPages
@@ -376,6 +303,30 @@ export default function App() {
     }
   };
 
+  const handleUseTrackedNumber = (docType: GovernmentDocType, stampNumber: string) => {
+    const matchedDocType = GOVERNMENT_DOCUMENT_TYPES.find((d) => d.id === docType);
+    setStamp((prev) => ({
+      ...prev,
+      documentType: docType,
+      prefix: matchedDocType ? matchedDocType.defaultPrefix : prev.prefix,
+      number: stampNumber,
+    }));
+    showToast(
+      pdfDocument
+        ? `Applied ${docType} #${stampNumber} to current document`
+        : `Queued ${docType} #${stampNumber} for your next PDF upload`
+    );
+  };
+
+  const handleClearTracker = () => {
+    setTrackerState(clearRecentTracker());
+    showToast('Recent tracker history cleared');
+  };
+
+  const handleDeleteTrackedItem = (id: string) => {
+    setTrackerState((prev) => removeTrackedHistoryItem(prev, id));
+  };
+
   const handleUpdateMetadata = (updated: Partial<CategorizedDocumentInfo>) => {
     setMetadata((prev) => ({ ...prev, ...updated }));
   };
@@ -385,6 +336,8 @@ export default function App() {
     showToast(`Applied "${num}" to stamp number!`);
   };
 
+  const trackedCategoryCount = GOVERNMENT_DOC_TYPES.filter((t) => Boolean(trackerState.lastByType[t])).length;
+
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-100 text-slate-900 overflow-hidden font-sans">
       {/* 1. TOP NAVIGATION BAR */}
@@ -393,13 +346,13 @@ export default function App() {
         totalPages={totalPages}
         currentPage={currentPage}
         currentNumber={stamp.number}
+        trackedCount={trackedCategoryCount}
         isProcessing={isProcessing}
         onDownload={handleOpenDownloadModal}
         onResetStamp={handleResetStamp}
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
-        onLoadSample={handleLoadSample}
-        onLoadTravelSample={handleLoadAuthorityToTravelSample}
         onOpenMetadataModal={() => setIsMetadataModalOpen(true)}
+        onOpenTrackerModal={() => setIsTrackerModalOpen(true)}
       />
 
       {/* 2. MAIN WORKSPACE CONTAINER */}
@@ -446,12 +399,15 @@ export default function App() {
             <StampControls
               stamp={stamp}
               metadata={metadata}
+              trackerState={trackerState}
               currentPage={currentPage}
               totalPages={totalPages}
               isProcessing={isProcessing}
               onStampChange={handleStampChange}
               onStampNudge={handleStampNudge}
               onDownload={handleOpenDownloadModal}
+              onOpenTrackerModal={() => setIsTrackerModalOpen(true)}
+              onUseTrackedNumber={handleUseTrackedNumber}
             />
           </>
         ) : (
@@ -459,8 +415,9 @@ export default function App() {
           <div className="flex-1 overflow-auto flex items-center justify-center p-4">
             <PdfDropzone
               onFileSelected={handleFileSelected}
-              onLoadSample={handleLoadSample}
-              isLoadingSample={isLoadingSample}
+              trackerState={trackerState}
+              onOpenTrackerModal={() => setIsTrackerModalOpen(true)}
+              onUseTrackedNumber={handleUseTrackedNumber}
             />
           </div>
         )}
@@ -489,7 +446,18 @@ export default function App() {
         onApplyStampNumber={handleApplyStampNumber}
       />
 
-      {/* 5. UPLOAD MODAL (when document is already open) */}
+      {/* 5. RECENT TRACKER MODAL (RSO, MEMO ES/FWA, MEMO_ATT/ATA, RAO_RMC, U_MEMO, NOV) */}
+      <RecentTrackerModal
+        isOpen={isTrackerModalOpen}
+        trackerState={trackerState}
+        hasActiveDocument={Boolean(pdfDocument)}
+        onClose={() => setIsTrackerModalOpen(false)}
+        onUseNumber={handleUseTrackedNumber}
+        onClearTracker={handleClearTracker}
+        onDeleteHistoryItem={handleDeleteTrackedItem}
+      />
+
+      {/* 6. UPLOAD MODAL (when document is already open) */}
       {isUploadModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl relative border border-slate-200">
@@ -507,8 +475,6 @@ export default function App() {
 
             <PdfDropzone
               onFileSelected={handleFileSelected}
-              onLoadSample={handleLoadSample}
-              isLoadingSample={isLoadingSample}
             />
           </div>
         </div>

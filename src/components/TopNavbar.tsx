@@ -1,18 +1,18 @@
 import React from 'react';
-import { FileText, Download, RotateCcw, Upload, CheckCircle2, ListFilter, Sparkles } from 'lucide-react';
+import { Download, RotateCcw, Upload, ListFilter, History } from 'lucide-react';
 
 interface TopNavbarProps {
   filename: string | null;
   totalPages: number;
   currentPage: number;
   currentNumber: string;
+  trackedCount: number;
   isProcessing: boolean;
   onDownload: () => void;
   onResetStamp: () => void;
   onOpenUploadModal: () => void;
-  onLoadSample: () => void;
-  onLoadTravelSample?: () => void;
   onOpenMetadataModal: () => void;
+  onOpenTrackerModal: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -20,30 +20,34 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   totalPages,
   currentPage,
   currentNumber,
+  trackedCount,
   isProcessing,
   onDownload,
   onResetStamp,
   onOpenUploadModal,
-  onLoadSample,
-  onLoadTravelSample,
   onOpenMetadataModal,
+  onOpenTrackerModal,
 }) => {
   return (
     <header className="h-16 bg-white border-b border-slate-200 px-4 md:px-6 flex items-center justify-between gap-4 shrink-0 shadow-xs z-30">
       {/* Zone 1: Brand & Document Title */}
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm tracking-wider shadow-sm shrink-0">
-          6D
+        <div className="px-2 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center font-extrabold text-[11px] tracking-wider shadow-sm shrink-0">
+          RAMS
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-900 text-base tracking-tight whitespace-nowrap">
-              DocStamp 6D
+            <span className="font-extrabold text-slate-900 text-xs sm:text-sm md:text-base tracking-tight truncate">
+              OFFICIAL RAMS ISSUANCES STAMPER
             </span>
-            <span className="text-xs text-slate-400 hidden sm:inline">|</span>
-            <span className="text-xs text-slate-500 font-medium hidden sm:inline truncate max-w-[200px] md:max-w-[280px]">
-              {filename || 'PDF Number Stamper'}
-            </span>
+            {filename && (
+              <>
+                <span className="text-xs text-slate-400 hidden lg:inline">|</span>
+                <span className="text-xs text-slate-500 font-medium hidden lg:inline truncate max-w-[180px]">
+                  {filename}
+                </span>
+              </>
+            )}
           </div>
           {filename && (
             <p className="text-xs text-slate-400 truncate hidden md:block">
@@ -65,40 +69,44 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         </button>
 
         <button
-          onClick={onLoadSample}
-          className="px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap border border-slate-200"
-          title="Load official DSWD Regional Special Order"
+          onClick={onOpenTrackerModal}
+          className="px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap border border-slate-200 shadow-2xs"
+          title="View Recent Tracker for RSO, MEMO ES/FWA, MEMO_ATT/ATA, RAO_RMC, U_MEMO, NOV"
         >
-          <FileText className="w-3.5 h-3.5 text-blue-600" />
-          <span className="hidden sm:inline">RSO Sample</span>
+          <History className="w-3.5 h-3.5 text-blue-600" />
+          <span className="hidden sm:inline">Recent Tracker</span>
+          {trackedCount > 0 && (
+            <span className="text-[10px] font-mono font-bold bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded">
+              {trackedCount}
+            </span>
+          )}
         </button>
-
-        {onLoadTravelSample && (
-          <button
-            onClick={onLoadTravelSample}
-            className="px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100/80 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap border border-blue-200"
-            title="Load Authority to Travel Sample Document (Subject: AUTHORITY TO TRAVEL)"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-            <span className="hidden sm:inline">Authority to Travel</span>
-          </button>
-        )}
 
         <button
           onClick={onOpenMetadataModal}
-          className="px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap border border-slate-200 shadow-2xs"
+          disabled={!filename}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap border shadow-2xs ${
+            !filename
+              ? 'text-slate-400 border-slate-100 bg-slate-50 cursor-not-allowed'
+              : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100 border-slate-200'
+          }`}
           title="View categorized PDF details (Name, Subject, Date, Approval)"
         >
-          <ListFilter className="w-3.5 h-3.5 text-blue-600" />
+          <ListFilter className={`w-3.5 h-3.5 ${!filename ? 'text-slate-300' : 'text-blue-600'}`} />
           <span className="hidden sm:inline">Document Info</span>
         </button>
 
         <button
           onClick={onResetStamp}
-          className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap"
+          disabled={!filename}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+            !filename
+              ? 'text-slate-300 cursor-not-allowed'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
           title="Reset stamp position and settings"
         >
-          <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+          <RotateCcw className={`w-3.5 h-3.5 ${!filename ? 'text-slate-300' : 'text-slate-500'}`} />
           <span className="hidden md:inline">Reset</span>
         </button>
       </nav>

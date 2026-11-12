@@ -207,3 +207,44 @@ export const DEFAULT_MODESTA_METADATA: CategorizedDocumentInfo = {
   tags: ['Authority to Travel', 'SLPA Training', 'Modesta Baguingan', 'San Juan La Union', '2026'],
 };
 
+export const EMPTY_DOCUMENT_METADATA: CategorizedDocumentInfo = {
+  title: '',
+  subject: '',
+  documentType: 'Document',
+  documentNumber: '000001',
+  series: `Series of ${new Date().getFullYear()}`,
+  annexRef: '',
+  headerLogosText: '',
+  bodyParagraph: '',
+  issuanceLocation: '',
+  tableHeaders: ['No.', 'Name', 'Position', 'Division/Section', 'Classification'],
+  dates: {
+    documentDate: new Date().toISOString().split('T')[0],
+    effectiveDateRange: '',
+    stampedDate: new Date().toISOString().split('T')[0],
+  },
+  personnel: [],
+  approval: {
+    approvedBy: '',
+    approverPosition: '',
+    issuingOffice: '',
+    annexRef: '',
+  },
+  event: {
+    purpose: '',
+    venue: '',
+  },
+  fullVerbatimText: '',
+  pagesText: [],
+  technical: {
+    filename: '',
+    fileSizeBytes: 0,
+    fileSizeFormatted: '0 KB',
+    totalPages: 0,
+    dimensions: 'Standard PDF Points',
+    pdfVersion: '1.7',
+  },
+  notes: '',
+  tags: [],
+};
+

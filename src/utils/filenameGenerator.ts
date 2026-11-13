@@ -143,6 +143,77 @@ export function toSentenceCase(text: string): string {
     .replace(/^([^a-zA-Z]*)([a-zA-Z])/, (_, prefix, firstChar) => `${prefix}${firstChar.toUpperCase()}`);
 }
 
+export interface GovernmentFilenameParts {
+  docType: GovernmentDocType;
+  cleanNumber: string;
+  year: string;
+  prefixPart: string;
+  subjectPart: string;
+  suffixPart: string;
+  fullFilename: string;
+}
+
+/**
+ * Computes the structured parts of the official government filename:
+ * [DOC_TYPE] [STAMP_NUMBER] s [YEAR]-[Subject in sentence case].pdf
+ */
+export function getGovernmentFilenameParts(
+  stamp: StampConfig,
+  metadata?: CategorizedDocumentInfo,
+  options?: {
+    selectedPages?: number[];
+    totalPages?: number;
+    docTypeOverride?: GovernmentDocType;
+    customSubject?: string;
+  }
+): GovernmentFilenameParts {
+  const docType = options?.docTypeOverride || detectGovernmentDocType(stamp, metadata);
+
+  const rawNumber = stamp.number || '000000';
+  const numMatch = rawNumber.match(/(?:No\.?\s*|#\s*)?([A-Za-z0-9_-]+)/i);
+  const cleanNumber = sanitizeFilenamePart(numMatch ? numMatch[1] : rawNumber);
+
+  const year = extractSeriesYear(metadata?.series, metadata?.dates?.documentDate);
+
+  const rawSubject =
+    options?.customSubject !== undefined && options.customSubject.trim().length > 0
+      ? options.customSubject
+      : metadata?.subject || 'Official issuance';
+  let subjectPart = sanitizeFilenamePart(rawSubject);
+
+  if (!subjectPart) {
+    subjectPart = 'Official issuance';
+  }
+
+  subjectPart = toSentenceCase(subjectPart);
+
+  if (subjectPart.length > 80) {
+    subjectPart = subjectPart.slice(0, 77).trim() + '...';
+  }
+
+  let pageSuffix = '';
+  if (options?.selectedPages && options?.totalPages && options.totalPages > 1) {
+    if (options.selectedPages.length === 1) {
+      pageSuffix = ` (p${options.selectedPages[0]})`;
+    } else if (options.selectedPages.length < options.totalPages) {
+      pageSuffix = ` (p${options.selectedPages.join(',')})`;
+    }
+  }
+
+  const prefixPart = `${docType} ${cleanNumber} s ${year}-`;
+  const suffixPart = `${pageSuffix}.pdf`;
+
+  return {
+    docType,
+    cleanNumber,
+    year,
+    prefixPart,
+    subjectPart,
+    suffixPart,
+    fullFilename: `${prefixPart}${subjectPart}${suffixPart}`,
+  };
+}
+
 /**
  * Generates the standardized official government filename format:
  * [DOC_TYPE] [STAMP_NUMBER] s [YEAR]-[Subject in sentence case].pdf
@@ -160,48 +231,6 @@ export function generateGovernmentFilename(
     customSubject?: string;
   }
 ): string {
-  // 1. Document Type: RSO, MEMO ES/FWA, MEMO_ATT/ATA, RAO_RMC, U_MEMO, NOV
-  const docType = options?.docTypeOverride || detectGovernmentDocType(stamp, metadata);
-
-  // 2. Stamp Number (e.g. 2544 or 002852)
-  const rawNumber = stamp.number || '000000';
-  // Strip any accidental leading "No. " or "#" typed into the number field
-  const numMatch = rawNumber.match(/(?:No\.?\s*|#\s*)?([A-Za-z0-9_-]+)/i);
-  const cleanNumber = sanitizeFilenamePart(numMatch ? numMatch[1] : rawNumber);
-
-  // 3. Series Year: e.g. "s 2026"
-  const year = extractSeriesYear(metadata?.series, metadata?.dates?.documentDate);
-
-  // 4. Subject formatted in Sentence case: e.g. "Official station" or "Authority to travel"
-  const rawSubject =
-    options?.customSubject !== undefined && options.customSubject.trim().length > 0
-      ? options.customSubject
-      : metadata?.subject || 'Official issuance';
-  let subject = sanitizeFilenamePart(rawSubject);
-
-  // If subject is completely empty, use clean default
-  if (!subject) {
-    subject = 'Official issuance';
-  }
-
-  subject = toSentenceCase(subject);
-
-  // Truncate overly long subjects while avoiding ugly trailing mid-space cuts
-  if (subject.length > 80) {
-    subject = subject.slice(0, 77).trim() + '...';
-  }
-
-  // Construct base name: "[DOC_TYPE] [STAMP_NUMBER] s [YEAR]-[SUBJECT]"
-  let filename = `${docType} ${cleanNumber} s ${year}-${subject}`;
-
-  // If downloading only a single page from a multi-page document
-  if (options?.selectedPages && options?.totalPages && options.totalPages > 1) {
-    if (options.selectedPages.length === 1) {
-      filename += ` (p${options.selectedPages[0]})`;
-    } else if (options.selectedPages.length < options.totalPages) {
-      filename += ` (p${options.selectedPages.join(',')})`;
-    }
-  }
-
-  return `${filename}.pdf`;
+  return getGovernmentFilenameParts(stamp, metadata, options).fullFilename;
 }
+

@@ -29,7 +29,7 @@ import {
 } from '../utils/pdfStamper';
 import { CategorizedDocumentInfo } from '../types/documentMetadata';
 import {
-  generateGovernmentFilename,
+  getGovernmentFilenameParts,
   GOVERNMENT_DOC_TYPES,
   GovernmentDocType,
   PRESET_FILENAME_SUBJECTS,
@@ -86,14 +86,24 @@ export const StampControls: React.FC<StampControlsProps> = ({
   onUseTrackedNumber,
 }) => {
   const [typedInput, setTypedInput] = useState(stamp.number);
-  const liveFilenamePreview = generateGovernmentFilename(stamp, metadata, {
+  const filenameParts = getGovernmentFilenameParts(stamp, metadata, {
     totalPages,
   });
+  const liveFilenamePreview = filenameParts.fullFilename;
   const activeSubjectText = metadata?.subject || pdfSubject || '';
+  const sentenceActiveSubject = toSentenceCase(activeSubjectText);
   const sentencePdfSubject = pdfSubject ? toSentenceCase(pdfSubject) : '';
   const isSubjectCustomized =
     Boolean(sentencePdfSubject) &&
-    toSentenceCase(activeSubjectText) !== sentencePdfSubject;
+    sentenceActiveSubject !== sentencePdfSubject;
+  const matchedPreset = PRESET_FILENAME_SUBJECTS.find(
+    (p) => toSentenceCase(p) === sentenceActiveSubject
+  );
+  const dropdownSubjectValue = matchedPreset
+    ? toSentenceCase(matchedPreset)
+    : sentencePdfSubject && sentenceActiveSubject === sentencePdfSubject
+      ? '__PDF_SUBJECT__'
+      : '__CUSTOM__';
 
   // Keep typed input in sync when stamp.number is updated externally
   useEffect(() => {
@@ -259,7 +269,7 @@ export const StampControls: React.FC<StampControlsProps> = ({
 
           {/* Live Government Filename Preview */}
           <div className="pt-1.5 border-t border-slate-200/80">
-            <div className="p-2.5 bg-blue-50/90 border border-blue-200 rounded-lg space-y-1.5">
+            <div className="p-2.5 bg-blue-50/90 border border-blue-200 rounded-lg space-y-2">
               <div className="flex items-center justify-between text-[10px] text-blue-900 font-semibold">
                 <span className="flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-blue-600" />
@@ -268,15 +278,57 @@ export const StampControls: React.FC<StampControlsProps> = ({
                 <span className="text-[9px] text-blue-600 font-mono">Format: [TYPE] [NO] s [YR]-[SUBJ]</span>
               </div>
 
-              <div className="font-mono text-[10px] font-bold text-slate-900 break-all bg-white p-1.5 rounded border border-blue-300 shadow-2xs">
-                {liveFilenamePreview}
+              <div className="bg-white p-2 rounded border border-blue-300 shadow-2xs space-y-1.5">
+                <div className="font-mono text-[10px] font-bold text-slate-900 break-all">
+                  {liveFilenamePreview}
+                </div>
+
+                {onSubjectChange && (
+                  <div className="flex flex-wrap items-center gap-1 pt-1.5 border-t border-slate-100 font-mono text-[10px]">
+                    <span className="text-slate-500 font-semibold shrink-0">
+                      {filenameParts.prefixPart}
+                    </span>
+                    <select
+                      aria-label="Select filename subject part"
+                      value={dropdownSubjectValue}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '__PDF_SUBJECT__' && pdfSubject) {
+                          onSubjectChange(toSentenceCase(pdfSubject));
+                        } else if (val !== '__CUSTOM__') {
+                          onSubjectChange(val);
+                        }
+                      }}
+                      className="flex-1 min-w-[140px] max-w-full px-1.5 py-0.5 bg-blue-50 border border-blue-300 rounded text-[10px] font-sans font-semibold text-blue-900 focus:outline-none focus:border-blue-600 cursor-pointer"
+                    >
+                      {sentencePdfSubject && (
+                        <option value="__PDF_SUBJECT__">
+                          PDF Subject: {sentencePdfSubject}
+                        </option>
+                      )}
+                      {PRESET_FILENAME_SUBJECTS.map((preset) => (
+                        <option key={preset} value={toSentenceCase(preset)}>
+                          {preset}
+                        </option>
+                      ))}
+                      {dropdownSubjectValue === '__CUSTOM__' && (
+                        <option value="__CUSTOM__">
+                          Custom: {sentenceActiveSubject || 'Official issuance'}
+                        </option>
+                      )}
+                    </select>
+                    <span className="text-slate-500 font-semibold shrink-0">
+                      {filenameParts.suffixPart}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* PDF Subject source verification & quick adjustment */}
               <div className="pt-0.5 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[9px] font-semibold text-blue-900/80">
-                    Subject (based on PDF Subject):
+                    Subject Part (Sentence case):
                   </span>
                   {isSubjectCustomized && onSubjectChange && pdfSubject && (
                     <button
@@ -299,32 +351,27 @@ export const StampControls: React.FC<StampControlsProps> = ({
                       placeholder="Extracted from PDF Subject..."
                       className="w-full px-2 py-1 text-[11px] bg-white border border-blue-200 rounded focus:outline-none focus:border-blue-500 text-slate-800 font-medium"
                     />
-                    <div className="space-y-1">
-                      <span className="text-[9px] font-semibold text-blue-900/75 block">
-                        Quick Select Subject:
-                      </span>
-                      <div className="flex flex-wrap gap-1">
-                        {PRESET_FILENAME_SUBJECTS.map((preset) => {
-                          const isSelected =
-                            toSentenceCase(activeSubjectText) === toSentenceCase(preset);
-                          return (
-                            <button
-                              key={preset}
-                              type="button"
-                              onClick={() => onSubjectChange(toSentenceCase(preset))}
-                              className={`px-2 py-1 rounded text-[10px] font-medium border text-left transition-colors flex items-center gap-1 ${
-                                isSelected
-                                  ? 'bg-blue-600 text-white border-blue-700 shadow-2xs font-semibold'
-                                  : 'bg-white hover:bg-blue-100/70 text-slate-700 border-blue-200'
-                              }`}
-                              title={`Set subject to "${toSentenceCase(preset)}"`}
-                            >
-                              {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
-                              <span>{preset}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                    <div className="flex flex-wrap gap-1">
+                      {PRESET_FILENAME_SUBJECTS.map((preset) => {
+                        const isSelected =
+                          sentenceActiveSubject === toSentenceCase(preset);
+                        return (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => onSubjectChange(toSentenceCase(preset))}
+                            className={`px-2 py-1 rounded text-[10px] font-medium border text-left transition-colors flex items-center gap-1 ${
+                              isSelected
+                                ? 'bg-blue-600 text-white border-blue-700 shadow-2xs font-semibold'
+                                : 'bg-white hover:bg-blue-100/70 text-slate-700 border-blue-200'
+                            }`}
+                            title={`Set subject to "${toSentenceCase(preset)}"`}
+                          >
+                            {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
+                            <span>{preset}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </>
                 ) : (

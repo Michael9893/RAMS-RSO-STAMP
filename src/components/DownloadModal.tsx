@@ -249,6 +249,16 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
 
   const isAllSelected = selectedPages.length === totalPages;
   const currentSeriesYear = extractSeriesYear(metadata?.series, metadata?.dates?.documentDate);
+  const sentenceModalSubject = toSentenceCase(customSubject);
+  const sentencePdfSubjectModal = pdfSubject ? toSentenceCase(pdfSubject) : '';
+  const matchedModalPreset = PRESET_FILENAME_SUBJECTS.find(
+    (p) => toSentenceCase(p) === sentenceModalSubject
+  );
+  const modalSubjectSelectValue = matchedModalPreset
+    ? toSentenceCase(matchedModalPreset)
+    : sentencePdfSubjectModal && sentenceModalSubject === sentencePdfSubjectModal
+      ? '__PDF_SUBJECT__'
+      : '__CUSTOM__';
 
   return (
     <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 md:p-6 z-50 animate-in fade-in duration-150">
@@ -464,6 +474,37 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                       </span>
                     </div>
                   </div>
+                  <select
+                    aria-label="Select preset or PDF subject for filename"
+                    value={modalSubjectSelectValue}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__PDF_SUBJECT__' && pdfSubject) {
+                        setCustomSubject(toSentenceCase(pdfSubject));
+                        setIsManualFilenameEdit(false);
+                      } else if (val !== '__CUSTOM__') {
+                        setCustomSubject(val);
+                        setIsManualFilenameEdit(false);
+                      }
+                    }}
+                    className="w-full px-2 py-1.5 text-xs bg-blue-50/70 border border-blue-300 rounded font-semibold text-blue-900 focus:outline-none focus:border-blue-600 cursor-pointer"
+                  >
+                    {sentencePdfSubjectModal && (
+                      <option value="__PDF_SUBJECT__">
+                        PDF Subject: {sentencePdfSubjectModal}
+                      </option>
+                    )}
+                    {PRESET_FILENAME_SUBJECTS.map((preset) => (
+                      <option key={preset} value={toSentenceCase(preset)}>
+                        {preset}
+                      </option>
+                    ))}
+                    {modalSubjectSelectValue === '__CUSTOM__' && (
+                      <option value="__CUSTOM__">
+                        Custom: {sentenceModalSubject || 'Official issuance'}
+                      </option>
+                    )}
+                  </select>
                   <input
                     type="text"
                     value={customSubject}
@@ -474,35 +515,30 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                     placeholder="e.g. Official station"
                     className="w-full px-2 py-1 text-xs border border-slate-300 rounded bg-white focus:outline-none focus:border-blue-500 font-medium"
                   />
-                  <div className="space-y-1">
-                    <span className="text-[9px] text-slate-500 font-semibold block">
-                      Select Preset Subject:
-                    </span>
-                    <div className="flex flex-wrap gap-1">
-                      {PRESET_FILENAME_SUBJECTS.map((preset) => {
-                        const isSelected =
-                          toSentenceCase(customSubject) === toSentenceCase(preset);
-                        return (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => {
-                              setCustomSubject(toSentenceCase(preset));
-                              setIsManualFilenameEdit(false);
-                            }}
-                            className={`px-2 py-1 rounded text-[10px] font-medium border text-left transition-colors flex items-center gap-1 ${
-                              isSelected
-                                ? 'bg-blue-600 text-white border-blue-700 shadow-2xs font-semibold'
-                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                            }`}
-                            title={`Use "${toSentenceCase(preset)}" as filename subject`}
-                          >
-                            {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
-                            <span>{preset}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <div className="flex flex-wrap gap-1">
+                    {PRESET_FILENAME_SUBJECTS.map((preset) => {
+                      const isSelected =
+                        sentenceModalSubject === toSentenceCase(preset);
+                      return (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => {
+                            setCustomSubject(toSentenceCase(preset));
+                            setIsManualFilenameEdit(false);
+                          }}
+                          className={`px-2 py-1 rounded text-[10px] font-medium border text-left transition-colors flex items-center gap-1 ${
+                            isSelected
+                              ? 'bg-blue-600 text-white border-blue-700 shadow-2xs font-semibold'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                          title={`Use "${toSentenceCase(preset)}" as filename subject`}
+                        >
+                          {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
+                          <span>{preset}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
